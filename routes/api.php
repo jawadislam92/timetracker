@@ -27,6 +27,19 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
+/*
+|--------------------------------------------------------------------------
+| Payroll export (read-only, static bearer token: PAYROLL_API_TOKEN)
+|--------------------------------------------------------------------------
+| Consumed by the Tankhwah payroll app. Returns users and resolved attendance
+| per day for a month. Disabled entirely (404) when the token is not set.
+*/
+Route::prefix('payroll')->middleware(['payroll.token', 'throttle:60,1'])->group(function () {
+    Route::get('/ping', [\App\Http\Controllers\Api\Payroll\PayrollController::class, 'ping'])->name('payroll.ping');
+    Route::get('/users', [\App\Http\Controllers\Api\Payroll\PayrollController::class, 'users'])->name('payroll.users');
+    Route::get('/attendance', [\App\Http\Controllers\Api\Payroll\PayrollController::class, 'attendance'])->name('payroll.attendance');
+});
+
 // Slack interactive button clicks (the "still working?" attendance check).
 // No auth middleware — authenticity is proven by the Slack signing-secret HMAC
 // verified inside the controller.

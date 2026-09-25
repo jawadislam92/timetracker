@@ -88,6 +88,7 @@ class Kernel extends HttpKernel
         'auth.session' => AuthenticateSession::class,
         'cache.headers' => SetCacheHeaders::class,
         'active' => EnsureUserIsActive::class,
+        'payroll.token' => \App\Http\Middleware\PayrollTokenMiddleware::class,
         'can' => Authorize::class,
         'guest' => RedirectIfAuthenticated::class,
         'password.confirm' => RequirePassword::class,

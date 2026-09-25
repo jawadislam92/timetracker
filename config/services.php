@@ -45,6 +45,12 @@ return [
         'token' => env('SCHEDULER_HTTP_TOKEN'),
     ],
 
+    // Shared bearer token for the READ-ONLY payroll export (/api/payroll/*),
+    // consumed by the Tankhwah payroll app. Leave unset to disable.
+    'payroll' => [
+        'token' => env('PAYROLL_API_TOKEN'),
+    ],
+
     // Slack bot (chat.postMessage + DMs) — one token posts to any channel the
     // bot is in, unlike per-channel incoming webhooks.
     'slack_bot' => [

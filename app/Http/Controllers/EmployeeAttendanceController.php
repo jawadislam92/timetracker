@@ -25,17 +25,9 @@ class EmployeeAttendanceController extends Controller
 {
     use CalculatesTimeStats;
 
-    private const ATTENDANCE_STATUSES = [
-        'P' => 'Present',
-        'A' => 'Absent',
-        'H' => 'Holiday',
-        'L' => 'Leave',
-        'HD' => 'Half day',
-        'WFH' => 'Work from home',
-        'LC' => 'Late coming',
-        'LI' => 'Late joining',
-        'PH' => 'Public holiday',
-    ];
+    // The catalogue and the day-resolution rules live in App\Support\AttendanceStatus
+    // so the payroll export (/api/payroll) resolves days exactly as this grid does.
+    private const ATTENDANCE_STATUSES = \App\Support\AttendanceStatus::CODES;
 
     /**
      * Display the employee attendance page
@@ -1040,105 +1032,17 @@ class EmployeeAttendanceController extends Controller
         Carbon $today,
         ?TimeEntry $firstClockIn
     ): array {
-        if ($manualMark) {
-            return [
-                'code' => $manualMark->status_code,
-                'label' => self::ATTENDANCE_STATUSES[$manualMark->status_code] ?? $manualMark->status_code,
-                'source' => 'manual',
-            ];
-        }
-
-        if ($date->isFuture() && ! $date->isSameDay($today)) {
-            return [
-                'code' => null,
-                'label' => 'Not set',
-                'source' => 'future',
-            ];
-        }
-
-        if ($this->isBeforeJoiningDate($employee, $date)) {
-            return [
-                'code' => 'LI',
-                'label' => self::ATTENDANCE_STATUSES['LI'],
-                'source' => 'automatic',
-            ];
-        }
-
-        if ($firstClockIn) {
-            if (AttendanceHours::isLateClockIn($employee, $date, $firstClockIn, 'Asia/Karachi')) {
-                return [
-                    'code' => 'LC',
-                    'label' => self::ATTENDANCE_STATUSES['LC'],
-                    'source' => 'automatic',
-                ];
-            }
-
-            return [
-                'code' => 'P',
-                'label' => self::ATTENDANCE_STATUSES['P'],
-                'source' => 'automatic',
-            ];
-        }
-
-        if ($date->isSunday()) {
-            return [
-                'code' => 'H',
-                'label' => self::ATTENDANCE_STATUSES['H'],
-                'source' => 'automatic',
-            ];
-        }
-
-        if ($date->isSameDay($today) && ! AttendanceHours::isShiftAbsenceDue($employee, $date, $now, 'Asia/Karachi')) {
-            return [
-                'code' => null,
-                'label' => 'Shift not started',
-                'source' => 'pending',
-            ];
-        }
-
-        return [
-            'code' => 'A',
-            'label' => self::ATTENDANCE_STATUSES['A'],
-            'source' => 'automatic',
-        ];
+        return \App\Support\AttendanceStatus::resolve($employee, $date, $manualMark, $now, $today, $firstClockIn, 'Asia/Karachi');
     }
 
     private function addStatusToSummary(array &$summary, ?string $statusCode, float|int $workHours): void
     {
-        $summary['total_work_hours'] += (float) $workHours;
-
-        if ($statusCode === 'LC') {
-            $summary['present']++;
-            $summary['late_coming']++;
-
-            return;
-        }
-
-        if ($statusCode === 'LI') {
-            $summary['late_joining']++;
-
-            return;
-        }
-
-        match ($statusCode) {
-            'P' => $summary['present']++,
-            'A' => $summary['absent']++,
-            'H' => $summary['holidays']++,
-            'L' => $summary['leave']++,
-            'HD' => $summary['half_day']++,
-            'WFH' => $summary['work_from_home']++,
-            'PH' => $summary['public_holiday']++,
-            default => null,
-        };
+        \App\Support\AttendanceStatus::addToSummary($summary, $statusCode, $workHours);
     }
 
     private function isBeforeJoiningDate(User $employee, Carbon $date): bool
     {
-        if (! $employee->joining_date) {
-            return false;
-        }
-
-        return $date->toDateString() < $employee->joining_date->toDateString();
+        return \App\Support\AttendanceStatus::isBeforeJoiningDate($employee, $date);
     }
 
 
