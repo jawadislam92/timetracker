@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use App\Database\ResilientMySqlConnector;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -11,7 +12,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // This host refuses MySQL connections in short bursts; the connector
+        // retries them instead of turning each burst into a page of 500s.
+        $this->app->bind('db.connector.mysql', fn () => new ResilientMySqlConnector);
     }
 
     /**

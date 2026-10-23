@@ -88,11 +88,17 @@ class AttendanceClockNotifier
      * their lockout messages land in the SAME thread as the person's clock
      * events instead of as standalone channel messages.
      */
-    public static function dayThreadTs(int $userId, string $actionDate): ?string
+    public static function dayThreadTs(int $userId, string|\DateTimeInterface $actionDate): ?string
     {
+        // Callers pass the entry's date-cast action_date, which stringifies as
+        // "Y-m-d 00:00:00"; compare on the calendar day.
+        $day = $actionDate instanceof \DateTimeInterface
+            ? $actionDate->format('Y-m-d')
+            : substr($actionDate, 0, 10);
+
         return TimeEntry::where('user_id', $userId)
-            ->where('action_date', $actionDate)
-            ->where('action', 'clock_in')
+            ->whereDate('action_date', $day)
+            ->where('action_type', 'clock_in')
             ->whereNotNull('slack_thread_ts')
             ->orderBy('action_timestamp')
             ->value('slack_thread_ts');
