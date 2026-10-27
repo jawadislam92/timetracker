@@ -15,6 +15,7 @@ import {
     LayoutGrid,
     LogOut,
     Menu,
+    PieChart,
     MonitorDown,
     Plus,
     Settings as SettingsIcon,
@@ -128,6 +129,7 @@ export default function Authenticated({ user, header, children }) {
 
     // Performance — reporting & analytics.
     const performanceItems = useMemo(() => [
+        can('reports.view') && { label: 'Summary', href: route('summary.index'), icon: PieChart, active: ['summary.index'] },
         can('reports.view') && { label: 'Reports', href: route('work-hours.report'), icon: BarChart3, active: ['work-hours.report'] },
         can('timeline.view_others') && { label: 'Team Performance', href: route('team.index'), icon: Activity, active: ['team.index'] },
     ].filter(Boolean), [user?.is_super_admin, user?.permissions]);

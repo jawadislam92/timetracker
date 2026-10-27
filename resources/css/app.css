@@ -282,3 +282,13 @@
         background: rgba(100, 116, 139, 0.7);
     }
 }
+
+/* Thin dark scrollbars for scrolling panels inside dark cards (Summary page). */
+.dark-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 transparent;
+}
+.dark-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.dark-scroll::-webkit-scrollbar-track { background: transparent; }
+.dark-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+.dark-scroll::-webkit-scrollbar-thumb:hover { background: #475569; }

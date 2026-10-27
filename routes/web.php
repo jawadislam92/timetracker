@@ -116,6 +116,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->middleware('permission:users.manage')->name('users.update');
     Route::delete('/users/{user}', [UserController::class, 'destroy'])->middleware('permission:users.delete')->name('users.destroy');
 
+    Route::get('/summary', [\App\Http\Controllers\SummaryController::class, 'index'])
+        ->middleware('permission:reports.view')
+        ->name('summary.index');
+    Route::put('/summary/layout', [\App\Http\Controllers\SummaryController::class, 'saveLayout'])
+        ->middleware('permission:reports.view')
+        ->name('summary.layout');
+    Route::put('/summary/departments', [\App\Http\Controllers\SummaryController::class, 'saveDepartments'])
+        ->middleware('permission:users.manage')
+        ->name('summary.departments');
+
     Route::get('/report', [WorkHourController::class, 'report'])
         ->middleware('permission:reports.view')
         ->name('work-hours.report');

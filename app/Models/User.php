@@ -49,6 +49,7 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'permissions',
+        'summary_layout',
     ];
 
     /**
@@ -79,6 +80,7 @@ class User extends Authenticatable
         'allow_multiple_devices' => 'boolean',
         'tracks_time' => 'boolean',
         'is_active' => 'boolean',
+        'summary_layout' => 'array',
     ];
 
     const ROLES = [
