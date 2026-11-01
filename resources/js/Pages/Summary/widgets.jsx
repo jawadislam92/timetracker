@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, ChevronRight, Minus } from 'lucide-react';
 import Avatar from '@/Components/Avatar';
 import { DailyColumns, Donut, Heatmap, LineChart, Ring, SegmentBar, Sparkline, useTip, TipRows } from './charts';
-import DataTable from './DataTable';
 import { BILLABLE, INTERNAL, TYPES, TYPE_KEYS, fmtHours, fmtPct, pct, shortDate, weekOf, dayName } from './model';
 
 /* ---------------- building blocks ---------------- */
@@ -42,7 +41,7 @@ export function Segmented({ value, onChange, options, size = 'sm', label }) {
     );
 }
 
-function Delta({ now, before, unit = '%', invert = false, points = false }) {
+export function Delta({ now, before, unit = '%', invert = false, points = false }) {
     if (before === null || before === undefined) return <span className="text-[11px] text-slate-500">no earlier data</span>;
     const diff = points ? now - before : before > 0 ? ((now - before) / before) * 100 : null;
     if (diff === null) return <span className="text-[11px] text-slate-500">new this period</span>;
@@ -58,7 +57,7 @@ function Delta({ now, before, unit = '%', invert = false, points = false }) {
     );
 }
 
-function SharePill({ value, low }) {
+export function SharePill({ value, low }) {
     const cls = low ? 'bg-rose-500/15 text-rose-300 ring-rose-500/30' : value >= 75 ? 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' : 'bg-amber-500/10 text-amber-200 ring-amber-500/25';
     return <span className={`inline-flex min-w-[3rem] justify-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ring-1 ${cls}`}>{fmtPct(value)}</span>;
 }
@@ -507,214 +506,6 @@ export function DayGrid({ ctx }) {
     return (
         <Panel title="Who logged what, day by day" subtitle="Darker = more hours. Gaps show days with nothing logged">
             <Heatmap days={days} rows={rows} onPickRow={(id) => open({ kind: 'person', userId: id })} />
-        </Panel>
-    );
-}
-
-/* ---------------- tables ---------------- */
-
-const typeColumns = (get, onlyBillable = false) =>
-    TYPE_KEYS.filter((k) => !onlyBillable || TYPES[k].billable).map((k) => ({
-        id: `t_${k}`,
-        label: TYPES[k].short,
-        dot: TYPES[k].color,
-        group: TYPES[k].billable ? 'Billable work types' : 'Internal work types',
-        align: 'right',
-        value: (r) => get(r)[k] || 0,
-        render: (r) => (get(r)[k] ? fmtHours(get(r)[k]) : <span className="text-slate-600">–</span>),
-        footer: (rs) => fmtHours(rs.reduce((s, r) => s + (get(r)[k] || 0), 0)),
-    }));
-
-const totalsColumns = (isLow, quiet = () => false) => [
-    { id: 'billable', label: 'Billable', group: 'Totals', align: 'right', value: (r) => r.billable, render: (r) => <span className="text-orange-200">{fmtHours(r.billable)}</span>, footer: (rs) => fmtHours(rs.reduce((s, r) => s + r.billable, 0)) },
-    { id: 'internal', label: 'Internal', group: 'Totals', align: 'right', value: (r) => r.total - r.billable, render: (r) => <span className="text-sky-200">{fmtHours(r.total - r.billable)}</span>, footer: (rs) => fmtHours(rs.reduce((s, r) => s + r.total - r.billable, 0)) },
-    { id: 'total', label: 'Total', group: 'Totals', align: 'right', value: (r) => r.total, render: (r) => <span className="font-semibold text-white">{fmtHours(r.total)}</span>, footer: (rs) => fmtHours(rs.reduce((s, r) => s + r.total, 0)) },
-    {
-        id: 'share',
-        label: 'Billable %',
-        group: 'Totals',
-        align: 'right',
-        value: (r) => pct(r.billable, r.total),
-        csv: (r) => Math.round(pct(r.billable, r.total)),
-        render: (r) => (
-            <span className="inline-flex items-center justify-end gap-2">
-                <span className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-slate-800 2xl:inline-block">
-                    <span className="block h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400" style={{ width: `${pct(r.billable, r.total)}%` }} />
-                </span>
-                <SharePill value={pct(r.billable, r.total)} low={!quiet(r) && isLow(pct(r.billable, r.total))} />
-            </span>
-        ),
-        footer: (rs) => {
-            const t = rs.reduce((s, r) => s + r.total, 0);
-            return fmtPct(pct(rs.reduce((s, r) => s + r.billable, 0), t));
-        },
-    },
-];
-
-export function TeamTable({ ctx }) {
-    const { agg, scopePeople, isLow, open, clients, prevByUser, tableConfig, setTableConfig, settings, scope } = ctx;
-    const cfg = tableConfig('team');
-    const by = cfg.by ?? 'person';
-    const quiet = (r) => settings.quietDepts.includes(r.department);
-
-    let rows;
-    let columns;
-    if (by === 'department') {
-        rows = [...agg.byDept.entries()].map(([name, d]) => ({ key: name, name, department: name, total: d.total, billable: d.billable, byType: d.byType, people: d.people.size, days: Object.keys(d.byDay).length }));
-        columns = [
-            { id: 'name', label: 'Department', sticky: true, hideable: false, searchable: true, value: (r) => r.name, render: (r) => <button type="button" onClick={() => open({ kind: 'department', department: r.name })} className="font-medium text-slate-100 hover:text-orange-300">{r.name}</button>, footer: 'Total' },
-            { id: 'people', label: 'People', group: 'Details', align: 'right', value: (r) => r.people },
-            { id: 'avg', label: 'Avg h / person', group: 'Details', align: 'right', value: (r) => (r.people ? r.total / r.people : 0), render: (r) => fmtHours(r.people ? r.total / r.people : 0) },
-            ...typeColumns((r) => r.byType),
-            ...totalsColumns(isLow, quiet),
-        ];
-    } else if (by === 'client') {
-        rows = [...agg.byClient.entries()].map(([id, c]) => ({ key: id, name: clients[id] ?? `Client #${id}`, total: c.total, billable: c.total, byType: c.byType, people: c.people.size, days: Object.keys(c.byDay).length }));
-        columns = [
-            { id: 'name', label: 'Client', sticky: true, hideable: false, searchable: true, value: (r) => r.name, render: (r) => <span className="text-slate-100">{r.name}</span>, footer: 'Total' },
-            { id: 'people', label: 'People', group: 'Details', align: 'right', value: (r) => r.people },
-            { id: 'days', label: 'Days worked', group: 'Details', align: 'right', value: (r) => r.days },
-            ...typeColumns((r) => r.byType, true),
-            { id: 'total', label: 'Total', group: 'Totals', align: 'right', value: (r) => r.total, render: (r) => <span className="font-semibold text-white">{fmtHours(r.total)}</span>, footer: (rs) => fmtHours(rs.reduce((s, r) => s + r.total, 0)) },
-            { id: 'cshare', label: 'Share of billable', group: 'Totals', align: 'right', value: (r) => pct(r.total, agg.billable), render: (r) => fmtPct(pct(r.total, agg.billable)), csv: (r) => Math.round(pct(r.total, agg.billable)) },
-        ];
-    } else {
-        rows = scopePeople
-            .filter((u) => agg.byUser.has(u.id) || cfg.showSilent)
-            .map((u) => {
-                const a = agg.byUser.get(u.id) || { total: 0, billable: 0, days: new Set(), byType: {} };
-                const p = prevByUser.get(u.id);
-                return { key: u.id, user: u, name: u.name, department: u.department, designation: u.designation, total: a.total, billable: a.billable, byType: a.byType, days: a.days.size, prevTotal: p?.total ?? null };
-            });
-        columns = [
-            {
-                id: 'name',
-                label: 'Person',
-                sticky: true,
-                hideable: false,
-                searchable: true,
-                value: (r) => r.name,
-                render: (r) => (
-                    <button type="button" onClick={() => open({ kind: 'person', userId: r.user.id })} className="flex items-center gap-2 text-left hover:text-orange-300">
-                        <Avatar user={r.user} size="sm" className="!h-6 !w-6 border-slate-700 !text-[10px]" />
-                        <span className="font-medium text-slate-100">{r.name}</span>
-                    </button>
-                ),
-                footer: 'Total',
-            },
-            { id: 'department', label: 'Department', group: 'Details', value: (r) => r.department, render: (r) => <span className="text-slate-400">{r.department}</span>, defaultHidden: scope.kind === 'department' },
-            { id: 'designation', label: 'Designation', group: 'Details', value: (r) => r.designation ?? '', render: (r) => <span className="text-slate-400">{r.designation ?? '—'}</span>, defaultHidden: true },
-            { id: 'days', label: 'Days', group: 'Details', align: 'right', value: (r) => r.days },
-            { id: 'avg', label: 'Avg h / day', group: 'Details', align: 'right', value: (r) => (r.days ? r.total / r.days : 0), render: (r) => fmtHours(r.days ? r.total / r.days : 0) },
-            ...typeColumns((r) => r.byType),
-            ...totalsColumns(isLow, quiet),
-            {
-                id: 'vsprev',
-                label: 'vs prev. period',
-                group: 'Totals',
-                align: 'right',
-                defaultHidden: true,
-                value: (r) => (r.prevTotal ? ((r.total - r.prevTotal) / r.prevTotal) * 100 : null),
-                render: (r) => <Delta now={r.total} before={r.prevTotal} />,
-                csv: (r) => (r.prevTotal ? Math.round(((r.total - r.prevTotal) / r.prevTotal) * 100) : ''),
-            },
-        ];
-    }
-
-    return (
-        <Panel title="Hours table" subtitle="The pivot you used to build in Excel. Choose rows, hide columns, sort, export.">
-            <DataTable
-                key={by}
-                columns={columns}
-                rows={rows}
-                config={cfg[by] ?? {}}
-                onConfig={(next) => setTableConfig('team', { ...cfg, [by]: next })}
-                filename={`summary-by-${by}-${ctx.start}-to-${ctx.end}`}
-                searchPlaceholder={`Search ${by === 'person' ? 'people' : by === 'client' ? 'clients' : 'departments'}…`}
-                toolbar={
-                    <>
-                        <Segmented
-                            label="One row per"
-                            value={by}
-                            onChange={(v) => setTableConfig('team', { ...cfg, by: v })}
-                            options={scope.kind === 'company' ? [['person', 'Person'], ['department', 'Department'], ['client', 'Client']] : [['person', 'Person'], ['client', 'Client']]}
-                        />
-                        {by === 'person' && (
-                            <label className="inline-flex items-center gap-2 text-xs text-slate-400">
-                                <input type="checkbox" checked={!!cfg.showSilent} onChange={(e) => setTableConfig('team', { ...cfg, showSilent: e.target.checked })} className="rounded border-slate-600 bg-slate-800 text-orange-500 focus:ring-orange-500/40" />
-                                Include people with 0 h
-                            </label>
-                        )}
-                    </>
-                }
-            />
-        </Panel>
-    );
-}
-
-export function PersonTable({ ctx }) {
-    const { rows: raw, days, weeks, clients, tableConfig, setTableConfig } = ctx;
-    const cfg = tableConfig('person');
-    const cols = cfg.cols ?? (days.length > 14 ? 'week' : 'day');
-    const buckets = cols === 'week' ? weeks : days;
-    const bucketOf = (d) => (cols === 'week' ? weekOf(d) : d);
-
-    const map = new Map();
-    for (const [, d, t, cid, h] of raw) {
-        const bill = TYPES[t]?.billable;
-        const key = bill && cid ? `c${cid}` : `t${t}`;
-        let row = map.get(key);
-        if (!row) {
-            row = { key, name: bill && cid ? clients[cid] ?? `Client #${cid}` : TYPES[t]?.label ?? t, kind: bill ? 'Billable' : 'Internal', color: TYPES[t]?.color, cells: {}, total: 0, billable: 0 };
-            map.set(key, row);
-        }
-        row.cells[bucketOf(d)] = (row.cells[bucketOf(d)] || 0) + h;
-        row.total += h;
-        if (bill) row.billable += h;
-    }
-    const rows = [...map.values()];
-
-    const columns = [
-        {
-            id: 'name',
-            label: 'Client / work',
-            sticky: true,
-            hideable: false,
-            searchable: true,
-            value: (r) => r.name,
-            render: (r) => (
-                <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full" style={{ background: r.kind === 'Billable' ? BILLABLE : INTERNAL }} />
-                    <span className="text-slate-100">{r.name}</span>
-                </span>
-            ),
-            footer: 'Total',
-        },
-        { id: 'kind', label: 'Type', group: 'Details', value: (r) => r.kind, render: (r) => <span className={r.kind === 'Billable' ? 'text-orange-200' : 'text-sky-200'}>{r.kind}</span> },
-        ...buckets.map((b) => ({
-            id: `b_${b}`,
-            label: cols === 'week' ? `Wk ${shortDate(b)}` : `${dayName(b)} ${shortDate(b)}`,
-            group: cols === 'week' ? 'Weeks' : 'Days',
-            align: 'right',
-            value: (r) => r.cells[b] || 0,
-            render: (r) => (r.cells[b] ? fmtHours(r.cells[b]) : <span className="text-slate-600">–</span>),
-            footer: (rs) => fmtHours(rs.reduce((s, r) => s + (r.cells[b] || 0), 0)),
-        })),
-        { id: 'total', label: 'Total', group: 'Totals', align: 'right', value: (r) => r.total, render: (r) => <span className="font-semibold text-white">{fmtHours(r.total)}</span>, footer: (rs) => fmtHours(rs.reduce((s, r) => s + r.total, 0)) },
-    ];
-
-    return (
-        <Panel title="Hours table" subtitle="Each client (and internal work) against each day or week">
-            <DataTable
-                key={cols}
-                columns={columns}
-                rows={rows}
-                config={{ sort: { id: 'total', dir: 'desc' }, ...(cfg[cols] ?? {}) }}
-                onConfig={(next) => setTableConfig('person', { ...cfg, [cols]: next })}
-                filename={`summary-${ctx.users.get(ctx.scope.userId)?.name ?? 'person'}-${ctx.start}-to-${ctx.end}`}
-                searchPlaceholder="Search clients…"
-                toolbar={<Segmented label="Columns are" value={cols} onChange={(v) => setTableConfig('person', { ...cfg, cols: v })} options={[['day', 'Days'], ['week', 'Weeks']]} />}
-            />
         </Panel>
     );
 }

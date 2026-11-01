@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\Designation;
 use App\Models\MonitoringSetting;
 use App\Models\TrackingAuditLog;
 use App\Models\TrackingSession;
 use App\Models\UpworkProfile;
 use App\Models\User;
 use App\Models\WorkHour;
+use App\Services\ReportSummaryService;
 use App\Services\SlackReportService;
 use App\Services\TrackingSessionService;
 use Illuminate\Http\Request;
@@ -126,6 +128,53 @@ class WorkHourController extends Controller
         }
     }
 
+    /**
+     * Departments hang off designations (case-insensitive), so a department
+     * filter becomes "designation is one of these". "Unassigned" matches
+     * people whose designation is blank or belongs to no department.
+     */
+    private function applyDepartmentFilter($query, array $departments): void
+    {
+        if (! $departments) {
+            return;
+        }
+        $map = Designation::departmentMap();
+        $wanted = array_keys(array_filter($map, fn ($d) => in_array($d, $departments, true)));
+        $unassigned = in_array(Designation::UNASSIGNED, $departments, true);
+
+        if (! $wanted && ! $unassigned) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $query->whereHas('user', function ($u) use ($wanted, $unassigned, $map) {
+            $u->where(function ($q) use ($wanted, $unassigned, $map) {
+                if ($wanted) {
+                    $q->whereIn(DB::raw('LOWER(TRIM(designation))'), $wanted);
+                }
+                if ($unassigned) {
+                    $q->orWhere(function ($qq) use ($map) {
+                        $qq->whereNull('designation')->orWhere('designation', '');
+                        if ($map) {
+                            $qq->orWhereNotIn(DB::raw('LOWER(TRIM(designation))'), array_keys($map));
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    /** user id => department, for the entry view's Department column. */
+    private function userDepartments(): array
+    {
+        $map = Designation::departmentMap();
+
+        return User::query()->get(['id', 'designation'])
+            ->mapWithKeys(fn ($u) => [$u->id => $map[mb_strtolower(trim((string) $u->designation))] ?? Designation::UNASSIGNED])
+            ->all();
+    }
+
     private function firstLegacyValue(array $values): string
     {
         return $values[0] ?? 'all';
@@ -225,6 +274,7 @@ class WorkHourController extends Controller
                 'workTypes' => $selectedWorkTypes,
                 'trackers' => $selectedTrackers,
                 'clients' => $selectedClients,
+                'departments' => $selectedDepartments,
             ],
             'filterOptions' => [
                 'workTypes' => self::WORK_TYPES,
@@ -553,7 +603,7 @@ class WorkHourController extends Controller
         ]);
     }
 
-    public function report(Request $request, SlackReportService $slack)
+    public function report(Request $request, SlackReportService $slack, ReportSummaryService $summaries)
     {
         $query = WorkHour::query();
         $filter = $request->input('filter', 'all');
@@ -564,6 +614,14 @@ class WorkHourController extends Controller
         $selectedDesignations = $this->filterValues($request, 'designations', 'designation');
         $selectedTrackers = $this->filterValues($request, 'trackers', 'tracker');
         $selectedClients = $this->filterValues($request, 'clients', 'client');
+        $selectedDepartments = $this->filterValues($request, 'departments');
+
+        // Display settings: URL first (shareable links), then the viewer's saved choice.
+        $saved = $request->user()->summary_layout['report'] ?? [];
+        $show = in_array($request->input('show'), ReportSummaryService::SHOWS, true) ? $request->input('show')
+            : (in_array($saved['show'] ?? null, ReportSummaryService::SHOWS, true) ? $saved['show'] : 'entries');
+        $group = in_array($request->input('group'), ReportSummaryService::GROUPS, true) ? $request->input('group')
+            : (in_array($saved['group'] ?? null, ReportSummaryService::GROUPS, true) ? $saved['group'] : 'none');
         $perPageInput = (string) $request->input('perPage', 15);
 
         // Fetch all available designation filter options.
@@ -620,6 +678,8 @@ class WorkHourController extends Controller
             'clients' => $selectedClients,
         ]);
 
+        $this->applyDepartmentFilter($query, $selectedDepartments);
+
         // Server-side search across all pages — the search box previously
         // only filtered the rows already on screen, silently hiding matches
         // that lived on other pages.
@@ -633,11 +693,19 @@ class WorkHourController extends Controller
             });
         }
 
+        // True totals for every matching row — the footer used to add up only
+        // the rows on the current page.
+        $totals = $summaries->totals($query);
+        $summary = $show === 'entries' ? null : $summaries->summarize($query, $show, $group);
+        $periodTotals = $show === 'entries' && $group !== 'none' ? $summaries->periodTotals($query, $group) : null;
+
         // Merge identical entries (same person · date · client · work type ·
         // tracker · source) into one totalled row, so a client logged three
         // times in a day shows once with the summed hours and an "×3" badge.
         // `?detailed=1` falls back to one row per raw entry.
-        if ($request->boolean('detailed')) {
+        if ($summary !== null) {
+            $workHours = null;
+        } elseif ($request->boolean('detailed')) {
             $workHours = $query->with('user', 'client')
                 ->orderByDesc('date')->orderByDesc('id')
                 ->paginate($perPage);
@@ -661,7 +729,7 @@ class WorkHourController extends Controller
             $workHours->through(fn ($r) => [
                 'id' => (int) $r->id,
                 'date' => substr((string) $r->date, 0, 10),
-                'user' => ['name' => $r->user_name],
+                'user' => ['id' => (int) $r->user_id, 'name' => $r->user_name],
                 // id included so rows are attributable to ONE client even when
                 // two clients share a display name (they do, in production).
                 'client' => $r->client_id ? ['id' => (int) $r->client_id, 'name' => $r->client_name] : null,
@@ -675,13 +743,21 @@ class WorkHourController extends Controller
         }
 
         // Preserve query parameters in pagination links
-        $workHours->appends($request->query());
+        $workHours?->appends($request->query());
 
         $users = User::orderBy('name')->get(['id', 'name', 'include_in_slack_reports']);
 
         return Inertia::render('WorkHoursReport', [
             'search' => $search,
             'workHours' => $workHours,
+            'show' => $show,
+            'group' => $group,
+            'totals' => $totals,
+            'summary' => $summary,
+            'periodTotals' => $periodTotals,
+            'reportLayout' => $saved,
+            'today' => \App\Support\BusinessTime::today()->toDateString(),
+            'userDepartments' => $this->userDepartments(),
             'users' => $users,
             'filter' => $filter,
             'startDate' => $startDate,
@@ -708,6 +784,7 @@ class WorkHourController extends Controller
                 'designations' => $availableDesignations,
                 'trackers' => $availableTrackers,
                 'clients' => $availableClients,
+                'departments' => collect(Designation::departmentMap())->values()->unique()->sort()->values()->push(Designation::UNASSIGNED)->all(),
             ],
             'slackConfigured' => $slack->configured(),
             'slackWeeklyEnabled' => (bool) config('services.slack_reports.weekly_enabled'),

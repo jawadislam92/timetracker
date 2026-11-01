@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Head, router } from '@inertiajs/react';
-import { ArrowDown, ArrowUp, Building2, Check, ChevronDown, ChevronRight, Eye, EyeOff, Search, SlidersHorizontal, UsersRound, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, Check, ChevronDown, ChevronRight, Eye, EyeOff, ListFilter, Search, SlidersHorizontal, UsersRound, X } from 'lucide-react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageShell from '@/Components/Layout/PageShell';
 import Avatar from '@/Components/Avatar';
+import DateRangeMenu, { presetSpans, prettySpan } from '@/Components/Reporting/DateRangeMenu';
+import Dialog, { DialogButtons, RadioGroup } from '@/Components/Reporting/Dialog';
+import SearchableMultiSelect from '@/Components/Filters/SearchableMultiSelect';
 import { TooltipProvider } from './charts';
-import { Clients, DayGrid, Departments, Flags, KpiStrip, Mix, People, PersonHeader, PersonTable, Segmented, TeamTable, Trend, Weekly } from './widgets';
-import { RANGES, aggregate, daysBetween, fmtHours, fmtPct, pct, shortDate, weeksBetween } from './model';
+import HoursTable from './HoursTable';
+import { Clients, DayGrid, Departments, Flags, KpiStrip, Mix, People, PersonHeader, Segmented, Trend, Weekly } from './widgets';
+import { TYPES, TYPE_KEYS, aggregate, daysBetween, fmtHours, fmtPct, pct, weeksBetween } from './model';
 
 /* ---------------- widget registry ---------------- */
 
@@ -20,8 +24,8 @@ const WIDGETS = {
     clients: { name: 'Clients', desc: 'Clients with the most billable hours.', Component: Clients },
     weekly: { name: 'Billable % by week', desc: 'Week-to-week billable share (per department on the company view).', Component: Weekly },
     daygrid: { name: 'Day-by-day grid', desc: 'A heat grid of hours per person (or work type) per day.', Component: DayGrid },
-    teamTable: { name: 'Hours table', desc: 'Pivot table by person, department or client with a column picker.', Component: TeamTable },
-    personTable: { name: 'Hours table', desc: 'Client × day (or week) table with a column picker.', Component: PersonTable },
+    teamTable: { name: 'Hours table', desc: 'Rows by person, department, client or work type; grouped by day, week or month; choose the columns.', Component: HoursTable },
+    personTable: { name: 'Hours table', desc: 'Rows by client or work type; grouped by day, week or month; choose the columns.', Component: HoursTable },
 };
 
 const DEFAULTS = {
@@ -69,13 +73,17 @@ function readScope(users) {
 
 /* ---------------- page ---------------- */
 
-export default function SummaryIndex({ auth, range, start, end, previous, rows, users: userList, clients, designations, layout: savedLayout, canEditDepartments }) {
+const NO_FILTERS = { people: [], clients: [], types: [], hours: 'any' };
+
+export default function SummaryIndex({ auth, range, start, end, today, previous, rows: allRows, users: userList, clients, designations, layout: savedLayout, canEditDepartments }) {
     const users = useMemo(() => new Map(userList.map((u) => [u.id, u])), [userList]);
     const [scope, setScope] = useState(() => readScope(users));
     const [layout, setLayout] = useState(() => normalizeLayout(savedLayout));
     const [customizing, setCustomizing] = useState(false);
     const [editingDepts, setEditingDepts] = useState(false);
     const [saveState, setSaveState] = useState('idle');
+    const [filters, setFilters] = useState(NO_FILTERS);
+    const [filtering, setFiltering] = useState(false);
 
     // Persist the layout to the viewer's account, debounced.
     const firstSave = useRef(true);
@@ -110,7 +118,28 @@ export default function SummaryIndex({ auth, range, start, end, previous, rows, 
     }, []);
 
     const scopeParams = () => (scope.kind === 'person' ? { person: scope.userId } : scope.kind === 'department' ? { department: scope.department } : {});
-    const changeRange = (params) => router.get(route('summary.index'), { ...params, ...scopeParams() }, { preserveScroll: true, preserveState: true, only: ['range', 'start', 'end', 'previous', 'rows', 'users', 'clients'] });
+    const changeRange = ({ range: r, start: s, end: e }) =>
+        router.get(route('summary.index'), { range: r, ...(r === 'custom' ? { start: s, end: e } : {}), ...scopeParams() }, { preserveScroll: true, preserveState: true, only: ['range', 'start', 'end', 'previous', 'rows', 'users', 'clients'] });
+
+    const spans = useMemo(() => presetSpans(today), [today]);
+    const rangePresets = [
+        ['this_week', 'Current week'],
+        ['last_week', 'Last week'],
+        ['last_4_weeks', 'Last 4 weeks'],
+        ['this_month', 'Current month'],
+        ['last_month', 'Last month'],
+        ['last_30_days', 'Last 30 days'],
+    ].map(([id, label]) => ({ id, label, start: spans[id][0], end: spans[id][1] }));
+
+    // Filter by: narrows every panel. Picking clients keeps only billable hours for them.
+    const peopleSet = useMemo(() => new Set(filters.people.map(Number)), [filters.people]);
+    const clientSet = useMemo(() => new Set(filters.clients.map(Number)), [filters.clients]);
+    const typeSet = useMemo(() => new Set(filters.types), [filters.types]);
+    const rows = useMemo(
+        () => (peopleSet.size || clientSet.size || typeSet.size ? allRows.filter((r) => (!peopleSet.size || peopleSet.has(r[0])) && (!clientSet.size || clientSet.has(r[3])) && (!typeSet.size || typeSet.has(r[2]))) : allRows),
+        [allRows, peopleSet, clientSet, typeSet],
+    );
+    const filterCount = filters.people.length + filters.clients.length + filters.types.length + (filters.hours !== 'any' ? 1 : 0);
 
     const days = useMemo(() => daysBetween(start, end), [start, end]);
     const weeks = useMemo(() => weeksBetween(start, end), [start, end]);
@@ -125,8 +154,19 @@ export default function SummaryIndex({ auth, range, start, end, previous, rows, 
         return [...m.entries()].sort((a, b) => (a[0] === 'Unassigned') - (b[0] === 'Unassigned') || a[0].localeCompare(b[0]));
     }, [userList, companyAgg]);
 
-    // People who belong on the page: active, or archived but logged hours.
-    const people = useMemo(() => userList.filter((u) => u.active || companyAgg.byUser.has(u.id)), [userList, companyAgg]);
+    // People who belong on the page: active, or archived but logged hours —
+    // then narrowed by the People and "Hours logged" filters.
+    const people = useMemo(
+        () =>
+            userList.filter((u) => {
+                if (!(u.active || companyAgg.byUser.has(u.id))) return false;
+                if (peopleSet.size && !peopleSet.has(u.id)) return false;
+                if (filters.hours === 'with') return companyAgg.byUser.has(u.id);
+                if (filters.hours === 'without') return !companyAgg.byUser.has(u.id);
+                return true;
+            }),
+        [userList, companyAgg, peopleSet, filters.hours],
+    );
     const scopePeople = useMemo(
         () => (scope.kind === 'person' ? people.filter((u) => u.id === scope.userId) : scope.kind === 'department' ? people.filter((u) => u.department === scope.department) : people),
         [people, scope],
@@ -135,7 +175,12 @@ export default function SummaryIndex({ auth, range, start, end, previous, rows, 
     const scopeRows = useMemo(() => (scope.kind === 'company' ? rows : rows.filter((r) => scopeIds.has(r[0]))), [rows, scope.kind, scopeIds]);
     const agg = useMemo(() => (scope.kind === 'company' ? companyAgg : aggregate(scopeRows, users)), [scope.kind, companyAgg, scopeRows, users]);
 
-    const prevByUser = useMemo(() => new Map(previous.people.map(([id, total, billable]) => [id, { total, billable }])), [previous]);
+    // The previous period only has per-person totals, so with a client or work-type
+    // filter on there is nothing like-for-like to compare against: drop the deltas.
+    const prevByUser = useMemo(
+        () => (clientSet.size || typeSet.size ? new Map() : new Map(previous.people.map(([id, total, billable]) => [id, { total, billable }]))),
+        [previous, clientSet, typeSet],
+    );
     const prev = useMemo(() => {
         let total = 0;
         let billable = 0;
@@ -190,13 +235,19 @@ export default function SummaryIndex({ auth, range, start, end, previous, rows, 
                             <h1 className="mt-1 flex items-center gap-3 text-2xl font-bold text-white">
                                 <span className="h-6 w-1 rounded-full bg-gradient-to-b from-orange-400 to-amber-500" aria-hidden="true" />
                                 Summary
-                                <span className="text-base font-normal text-slate-400">
-                                    {shortDate(start)} – {shortDate(end)}
-                                </span>
+                                <span className="text-base font-normal tabular-nums text-slate-400">{prettySpan(start, end)}</span>
                             </h1>
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <RangePicker range={range} start={start} end={end} onChange={changeRange} />
+                            <DateRangeMenu range={range} start={start} end={end} presets={rangePresets} onChange={changeRange} maxDate={today} />
+                            <button
+                                type="button"
+                                onClick={() => setFiltering(true)}
+                                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${filterCount ? 'border-orange-500/60 bg-orange-500/10 text-orange-100' : 'border-slate-700 text-slate-200 hover:bg-slate-800'}`}
+                            >
+                                <ListFilter className="h-4 w-4" /> Filters
+                                {filterCount > 0 && <span className="rounded-full bg-orange-500 px-1.5 text-[11px] font-semibold tabular-nums text-slate-950">{filterCount}</span>}
+                            </button>
                             <button
                                 type="button"
                                 onClick={() => setCustomizing(true)}
@@ -225,6 +276,8 @@ export default function SummaryIndex({ auth, range, start, end, previous, rows, 
                         </div>
                     </section>
 
+                    {filterCount > 0 && <FilterChips filters={filters} setFilters={setFilters} users={users} clients={clients} />}
+
                     {scope.kind === 'person' && <PersonHeader ctx={ctx} />}
 
                     {/* widgets */}
@@ -251,6 +304,7 @@ export default function SummaryIndex({ auth, range, start, end, previous, rows, 
 
                 {customizing && <CustomizeDrawer scope={scope} layout={layout} setLayout={setLayout} departments={departments.map(([n]) => n)} onClose={() => setCustomizing(false)} saveState={saveState} />}
                 {editingDepts && <DepartmentsDialog designations={designations} onClose={() => setEditingDepts(false)} />}
+                {filtering && <FilterDialog filters={filters} users={userList} clients={clients} onClose={() => setFiltering(false)} onApply={(f) => { setFilters(f); setFiltering(false); }} />}
             </TooltipProvider>
         </AuthenticatedLayout>
     );
@@ -275,46 +329,58 @@ function ScopeChip({ active, soft, onClick, label, count, icon: Icon }) {
     );
 }
 
-/* ---------------- range ---------------- */
+/* ---------------- filters ---------------- */
 
-function RangePicker({ range, start, end, onChange }) {
-    const [custom, setCustom] = useState(range === 'custom');
-    const [s, setS] = useState(start);
-    const [e, setE] = useState(end);
-    useEffect(() => {
-        setS(start);
-        setE(end);
-    }, [start, end]);
+const HOURS_LOGGED = [['any', 'Everyone'], ['with', 'Logged hours in this period'], ['without', 'Logged nothing in this period']];
+
+function FilterDialog({ filters, users, clients, onClose, onApply }) {
+    const [f, setF] = useState(filters);
+    const userOptions = users.map((u) => ({ value: String(u.id), label: u.name }));
+    const clientOptions = Object.entries(clients)
+        .map(([id, name]) => ({ value: String(id), label: name }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    const typeOptions = TYPE_KEYS.map((k) => ({ value: k, label: `${TYPES[k].label} (${TYPES[k].billable ? 'billable' : 'internal'})` }));
+    const changed = JSON.stringify(f) !== JSON.stringify(filters);
 
     return (
-        <div className="flex max-w-full flex-wrap items-center gap-2">
-            <Segmented
-                label="Period"
-                size="md"
-                value={custom ? 'custom' : range}
-                onChange={(v) => {
-                    if (v === 'custom') return setCustom(true);
-                    setCustom(false);
-                    onChange({ range: v });
-                }}
-                options={[...RANGES, ['custom', 'Custom']]}
-            />
-            {custom && (
-                <form
-                    className="flex items-center gap-1.5"
-                    onSubmit={(ev) => {
-                        ev.preventDefault();
-                        onChange({ range: 'custom', start: s, end: e });
-                    }}
-                >
-                    <input type="date" value={s} max={e} onChange={(ev) => setS(ev.target.value)} aria-label="From" className="rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1.5 text-sm text-slate-200 [color-scheme:dark]" />
-                    <span className="text-slate-500">–</span>
-                    <input type="date" value={e} min={s} onChange={(ev) => setE(ev.target.value)} aria-label="To" className="rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1.5 text-sm text-slate-200 [color-scheme:dark]" />
-                    <button type="submit" className="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-600">
-                        Apply
+        <Dialog
+            title="Filter by"
+            scroll={false}
+            onClose={onClose}
+            footer={<DialogButtons onCancel={onClose} onReset={() => setF(NO_FILTERS)} resettable={JSON.stringify(f) !== JSON.stringify(NO_FILTERS)} onApply={() => onApply(f)} applyLabel="Apply filters" dirty={changed} />}
+        >
+            <div className="space-y-5 pb-2">
+                <SearchableMultiSelect label="People" options={userOptions} selectedValues={f.people} onChange={(people) => setF({ ...f, people })} placeholder="All people" searchPlaceholder="Search people…" />
+                <SearchableMultiSelect label="Clients" options={clientOptions} selectedValues={f.clients} onChange={(clients) => setF({ ...f, clients })} placeholder="All clients" searchPlaceholder="Search clients…" />
+                <SearchableMultiSelect label="Work type" options={typeOptions} selectedValues={f.types} onChange={(types) => setF({ ...f, types })} placeholder="All work types" />
+                <RadioGroup label="Hours logged" name="hours-logged" value={f.hours} onChange={(hours) => setF({ ...f, hours })} options={HOURS_LOGGED} />
+                <p className="text-xs text-slate-500">Filters apply to every panel on this page until you reset them. Choosing clients leaves only billable hours for those clients.</p>
+            </div>
+        </Dialog>
+    );
+}
+
+function FilterChips({ filters, setFilters, users, clients }) {
+    const chips = [
+        ...filters.people.map((id) => ({ key: `p${id}`, label: users.get(Number(id))?.name ?? `#${id}`, drop: () => setFilters({ ...filters, people: filters.people.filter((x) => x !== id) }) })),
+        ...filters.clients.map((id) => ({ key: `c${id}`, label: clients[id] ?? `Client #${id}`, drop: () => setFilters({ ...filters, clients: filters.clients.filter((x) => x !== id) }) })),
+        ...filters.types.map((t) => ({ key: `t${t}`, label: TYPES[t]?.label ?? t, drop: () => setFilters({ ...filters, types: filters.types.filter((x) => x !== t) }) })),
+        ...(filters.hours !== 'any' ? [{ key: 'h', label: HOURS_LOGGED.find(([v]) => v === filters.hours)[1], drop: () => setFilters({ ...filters, hours: 'any' }) }] : []),
+    ];
+    return (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-orange-500/20 bg-orange-500/5 px-3 py-2">
+            <span className="mr-1 text-xs font-medium text-orange-200/80">Filtered by</span>
+            {chips.map((c) => (
+                <span key={c.key} className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900 py-0.5 pl-2.5 pr-1 text-xs text-slate-200">
+                    {c.label}
+                    <button type="button" onClick={c.drop} className="rounded-full p-0.5 text-slate-400 hover:bg-slate-700 hover:text-white" aria-label={`Remove filter ${c.label}`}>
+                        <X className="h-3 w-3" />
                     </button>
-                </form>
-            )}
+                </span>
+            ))}
+            <button type="button" onClick={() => setFilters(NO_FILTERS)} className="ml-auto text-xs font-medium text-orange-300 hover:text-orange-200">
+                Clear all
+            </button>
         </div>
     );
 }

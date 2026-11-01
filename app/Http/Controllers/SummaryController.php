@@ -24,7 +24,7 @@ class SummaryController extends Controller
     /** Hours charged to a client. Everything else is internal. */
     public const BILLABLE_TYPES = ['tracker', 'manual', 'outside_of_upwork', 'fixed'];
 
-    public const RANGES = ['this_week', 'last_week', 'last_4_weeks', 'this_month', 'last_month', 'custom'];
+    public const RANGES = ['this_week', 'last_week', 'last_4_weeks', 'this_month', 'last_month', 'last_30_days', 'custom'];
 
     /** Longest custom range; keeps the payload a few thousand rows. */
     private const MAX_DAYS = 186;
@@ -94,22 +94,38 @@ class SummaryController extends Controller
             'clients' => $clients,
             'billableTypes' => self::BILLABLE_TYPES,
             'designations' => $this->designationRows(),
-            'layout' => $request->user()->summary_layout,
+            'layout' => collect($request->user()->summary_layout ?? [])->except('report')->all() ?: null,
+            'today' => BusinessTime::today()->toDateString(),
             'canEditDepartments' => $request->user()->hasPermission('users.manage'),
         ]);
     }
 
-    /** Save the viewer's own widget layout so it follows them between computers. */
+    /**
+     * Save the viewer's own layout so it follows them between computers.
+     * section=report stores the Work Hours Report's display settings beside
+     * the Summary layout; each save leaves the other section untouched.
+     */
     public function saveLayout(Request $request)
     {
         $data = $request->validate([
             'layout' => ['present', 'nullable', 'array'],
+            'section' => ['nullable', Rule::in(['summary', 'report'])],
         ]);
 
-        $json = json_encode($data['layout']);
-        abort_if($json !== false && strlen($json) > 20000, 422, 'Layout is too large.');
+        $current = $request->user()->summary_layout ?? [];
+        if (($data['section'] ?? 'summary') === 'report') {
+            $next = array_merge($current, ['report' => $data['layout'] ?? []]);
+        } else {
+            $next = $data['layout'] ?? [];
+            if (isset($current['report'])) {
+                $next['report'] = $current['report'];
+            }
+        }
 
-        $request->user()->forceFill(['summary_layout' => $data['layout']])->save();
+        $json = json_encode($next);
+        abort_if($json !== false && strlen($json) > 30000, 422, 'Layout is too large.');
+
+        $request->user()->forceFill(['summary_layout' => $next ?: null])->save();
 
         return response()->json(['saved' => true]);
     }
@@ -169,6 +185,7 @@ class SummaryController extends Controller
             'last_week' => [$monday->copy()->subWeek(), $monday->copy()->subDay()],
             'this_month' => [$today->copy()->startOfMonth(), $today],
             'last_month' => [$today->copy()->subMonthNoOverflow()->startOfMonth(), $today->copy()->subMonthNoOverflow()->endOfMonth()->startOfDay()],
+            'last_30_days' => [$today->copy()->subDays(29), $today],
             'custom' => $this->customRange($start, $end, $today),
             default => [$monday->copy()->subWeeks(4), $monday->copy()->subDay()],
         };
