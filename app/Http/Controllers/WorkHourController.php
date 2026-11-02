@@ -274,7 +274,6 @@ class WorkHourController extends Controller
                 'workTypes' => $selectedWorkTypes,
                 'trackers' => $selectedTrackers,
                 'clients' => $selectedClients,
-                'departments' => $selectedDepartments,
             ],
             'filterOptions' => [
                 'workTypes' => self::WORK_TYPES,
@@ -777,6 +776,7 @@ class WorkHourController extends Controller
                 'designations' => $selectedDesignations,
                 'trackers' => $selectedTrackers,
                 'clients' => $selectedClients,
+                'departments' => $selectedDepartments,
             ],
             'filterOptions' => [
                 'workTypes' => self::WORK_TYPES,

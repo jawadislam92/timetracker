@@ -117,4 +117,18 @@ class ReportDisplaySettingsTest extends TestCase
         $this->actingAs($this->admin)->get('/summary')
             ->assertInertia(fn (Assert $page) => $page->missing('layout.report'));
     }
+
+    /** Regression: a report-only variable leaked into the Work Diary page and 500'd it (and the redirect after Create Entry). */
+    public function test_work_diary_page_and_create_entry_redirect_still_work(): void
+    {
+        $this->actingAs($this->designer)->get(route('work-hours.index'))->assertOk();
+
+        $this->actingAs($this->admin)->get(route('work-hours.index', ['startDate' => '2026-10-01', 'endDate' => '2026-11-01']))->assertOk();
+    }
+
+    public function test_department_filter_is_echoed_back_for_the_chips(): void
+    {
+        $this->actingAs($this->admin)->get(route('work-hours.report', ['departments' => ['Graphic Design']]))
+            ->assertInertia(fn (Assert $page) => $page->where('selectedFilters.departments', ['Graphic Design']));
+    }
 }
