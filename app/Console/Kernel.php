@@ -83,6 +83,14 @@ class Kernel extends ConsoleKernel
             }
         })->name('config-cache-self-heal')->everyFiveMinutes();
 
+        // Shared hosting has no long-running processes, so the cron-driven
+        // scheduler drains the database queue once a minute.
+        if (config('queue.default') === 'database') {
+            $schedule->command('queue:work --stop-when-empty --max-time=50 --tries=3')
+                ->everyMinute()
+                ->withoutOverlapping(3);
+        }
+
         // Liveness marker: this file's mtime shows when the scheduler last
         // ran, regardless of what drives it (host cron or the HTTP trigger).
         $schedule->call(function () {

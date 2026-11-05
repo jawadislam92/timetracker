@@ -439,6 +439,26 @@ class DeveloperController extends Controller
             'detail' => filled(config('services.slack_reports.webhook_url')) ? 'configured' : 'not set',
         ];
 
+        // Background queue: the oldest waiting job shows whether the worker runs
+        try {
+            $connection = (string) config('queue.default');
+            if ($connection === 'database') {
+                $pending = DB::table('jobs')->count();
+                $oldest = DB::table('jobs')->min('created_at');
+                $waited = $oldest ? max(0, now()->timestamp - (int) $oldest) : 0;
+                $failed = DB::table('failed_jobs')->count();
+                $checks[] = [
+                    'name' => 'Background queue',
+                    'ok' => $waited < 300 && $failed === 0,
+                    'detail' => "{$pending} waiting, oldest {$waited}s, {$failed} failed",
+                ];
+            } else {
+                $checks[] = ['name' => 'Background queue', 'ok' => false, 'detail' => "{$connection}: runs inside requests"];
+            }
+        } catch (\Throwable $e) {
+            $checks[] = ['name' => 'Background queue', 'ok' => false, 'detail' => $e->getMessage()];
+        }
+
         // Pending migrations
         try {
             $migrator = app('migrator');

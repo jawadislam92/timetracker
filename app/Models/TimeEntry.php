@@ -29,9 +29,10 @@ class TimeEntry extends Model
      * Announce clock activity to the attendance Slack channel as one thread per
      * person per day (clock-in is the parent; breaks and clock-out are
      * replies). Fires for web, desktop, and any path that creates the entry.
-     * The post runs as a terminating callback so it never adds latency to the
-     * clock action itself. {@see \App\Services\AttendanceClockNotifier} holds
-     * the threading + gating rules.
+     * It is queued from a terminating callback so it never adds latency to the
+     * clock action itself; the scheduled worker posts it within a minute.
+     * {@see \App\Services\AttendanceClockNotifier} holds the threading + gating
+     * rules.
      */
     protected static function booted(): void
     {
@@ -44,7 +45,7 @@ class TimeEntry extends Model
 
             app()->terminating(function () use ($entry) {
                 try {
-                    app(\App\Services\AttendanceClockNotifier::class)->notify($entry);
+                    \App\Jobs\PostClockEventToSlack::dispatch($entry->id);
                 } catch (\Throwable $e) {
                     \Illuminate\Support\Facades\Log::warning('Attendance Slack post failed', ['message' => $e->getMessage()]);
                 }
