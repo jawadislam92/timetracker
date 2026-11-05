@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CompanyHoliday;
 use App\Models\ManualAttendanceMark;
 use App\Models\TimeEntry;
 use App\Models\User;
@@ -70,14 +71,16 @@ class AttendanceSlackReportService
             ->get()
             ->keyBy(fn (ManualAttendanceMark $mark) => $mark->user_id.'|'.$mark->attendance_date->toDateString());
 
-        $rows = $users->map(function (User $user) use ($startDate, $endDate, $now, $today, $entriesByUserDate, $manualMarks, $includeFields) {
+        $holidays = CompanyHoliday::between($startDate, $endDate);
+
+        $rows = $users->map(function (User $user) use ($startDate, $endDate, $now, $today, $entriesByUserDate, $manualMarks, $holidays, $includeFields) {
             $summary = $this->emptySummary();
 
             for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
                 $key = $user->id.'|'.$date->toDateString();
                 $entries = $entriesByUserDate->get($key, collect());
                 $manualMark = $manualMarks->get($key);
-                $statusCode = $this->statusForDate($user, $date, $entries, $manualMark, $now, $today);
+                $statusCode = $this->statusForDate($user, $date, $entries, $manualMark, $now, $today, ($holidays[$date->toDateString()] ?? null)?->status_code);
 
                 if ($statusCode) {
                     $this->addStatusToSummary($summary, $statusCode);
@@ -203,10 +206,15 @@ class AttendanceSlackReportService
         Collection $entries,
         ?ManualAttendanceMark $manualMark,
         Carbon $now,
-        Carbon $today
+        Carbon $today,
+        ?string $holidayCode = null
     ): ?string {
         if ($manualMark) {
             return $manualMark->status_code;
+        }
+
+        if ($holidayCode && $entries->where('action_type', 'clock_in')->isEmpty() && ! $this->isBeforeJoiningDate($user, $date)) {
+            return $holidayCode;
         }
 
         if ($date->isFuture() && ! $date->isSameDay($today)) {

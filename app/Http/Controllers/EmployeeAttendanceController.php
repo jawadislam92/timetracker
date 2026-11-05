@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\CalculatesTimeStats;
+use App\Models\AttendanceBulkAction;
+use App\Models\CompanyHoliday;
 use App\Models\ManualAttendanceAudit;
 use App\Models\ManualAttendanceMark;
 use App\Models\TimeEntry;
@@ -324,22 +326,29 @@ class EmployeeAttendanceController extends Controller
     {
         $validated = $request->validate([
             'month' => ['nullable', 'date_format:Y-m'],
+            'week' => ['nullable', 'date_format:Y-m-d'],
         ]);
 
         $month = $validated['month'] ?? Carbon::today('Asia/Karachi')->format('Y-m');
-        $startDate = Carbon::createFromFormat('Y-m-d', "{$month}-01", 'Asia/Karachi')->startOfDay();
-        $endDate = $startDate->copy()->endOfMonth();
+        if (! empty($validated['week'])) {
+            $startDate = Carbon::parse($validated['week'], 'Asia/Karachi')->startOfWeek(Carbon::MONDAY)->startOfDay();
+            $endDate = $startDate->copy()->addDays(6)->endOfDay();
+        } else {
+            $startDate = Carbon::createFromFormat('Y-m-d', "{$month}-01", 'Asia/Karachi')->startOfDay();
+            $endDate = $startDate->copy()->endOfMonth();
+        }
         $now = Carbon::now('Asia/Karachi');
         $today = $now->copy()->startOfDay();
+        $holidays = CompanyHoliday::between($startDate, $endDate);
 
-        $days = collect(range(1, $endDate->day))->map(function (int $day) use ($startDate) {
-            $date = $startDate->copy()->day($day);
-
+        $days = collect(CarbonPeriod::create($startDate, $endDate->copy()->startOfDay()))->map(function (Carbon $date) use ($holidays) {
             return [
                 'date' => $date->toDateString(),
                 'day' => $date->day,
+                'month_label' => $date->format('M'),
                 'weekday' => $date->format('D'),
                 'is_weekend' => $date->isSunday(),
+                'holiday' => ($holidays[$date->toDateString()] ?? null)?->name,
             ];
         });
 
@@ -398,10 +407,10 @@ class EmployeeAttendanceController extends Controller
             ->orderBy('name');
         \App\Support\ShiftFilter::apply($employeesQuery, $request);
         $employees = $employeesQuery->get()
-            ->map(function (User $employee) use ($days, $carbonDays, $entriesByUserDate, $manualMarks, $now, $today, $summaryTemplate) {
+            ->map(function (User $employee) use ($days, $carbonDays, $entriesByUserDate, $manualMarks, $holidays, $now, $today, $summaryTemplate) {
                 $summary = $summaryTemplate;
 
-                $dayCells = $days->map(function (array $day) use ($employee, $carbonDays, $entriesByUserDate, $manualMarks, $now, $today, &$summary) {
+                $dayCells = $days->map(function (array $day) use ($employee, $carbonDays, $entriesByUserDate, $manualMarks, $holidays, $now, $today, &$summary) {
                     $date = $carbonDays[$day['date']];
                     $key = $employee->id.'|'.$day['date'];
                     $entries = $entriesByUserDate->get($key, collect());
@@ -410,7 +419,7 @@ class EmployeeAttendanceController extends Controller
 
                     $firstClockIn = $entries->where('action_type', 'clock_in')->first();
                     $lastEntry = $entries->last();
-                    $status = $this->resolveMonthlyStatus($employee, $date, $entries, $manualMark, $now, $today, $firstClockIn);
+                    $status = $this->resolveMonthlyStatus($employee, $date, $entries, $manualMark, $now, $today, $firstClockIn, ($holidays[$day['date']] ?? null)?->status_code);
                     $this->addStatusToSummary($summary, $status['code'], $stats['workHours'] ?? 0);
 
                     return [
@@ -526,7 +535,87 @@ class EmployeeAttendanceController extends Controller
         return response()->json(['message' => 'Attendance status updated.']);
     }
 
+    /**
+     * What a calendar change would do, day by day, so the confirmation can name
+     * the exact days and warn when it would hide real attendance. Changes nothing.
+     */
+    public function previewCalendar(Request $request)
+    {
+        [$validated, $userIds, $dates] = $this->calendarInput($request);
+        [$first, $last] = [$dates->first(), $dates->last()];
+
+        $clockedIn = TimeEntry::query()
+            ->whereIn('user_id', $userIds)
+            ->whereDate('action_date', '>=', $first)
+            ->whereDate('action_date', '<=', $last)
+            ->where('action_type', 'clock_in')
+            ->get(['user_id', 'action_date'])
+            ->groupBy(fn (TimeEntry $entry) => $entry->action_date->toDateString())
+            ->map(fn ($rows) => $rows->pluck('user_id')->unique()->count());
+
+        $marks = ManualAttendanceMark::query()
+            ->whereIn('user_id', $userIds)
+            ->whereDate('attendance_date', '>=', $first)
+            ->whereDate('attendance_date', '<=', $last)
+            ->get(['status_code', 'attendance_date']);
+        $isApply = $validated['operation'] === 'apply';
+        $replaced = $isApply ? $marks->where('status_code', '!=', $validated['status_code']) : $marks;
+        $replacedByDate = $replaced->countBy(fn (ManualAttendanceMark $mark) => $mark->attendance_date->toDateString());
+
+        return response()->json([
+            'operation' => $validated['operation'],
+            'status_label' => $isApply ? self::ATTENDANCE_STATUSES[$validated['status_code']] : null,
+            'people' => count($userIds),
+            'cells' => $isApply ? count($userIds) * $dates->count() : $marks->count(),
+            'replaced' => $replaced->count(),
+            'days' => $dates->map(fn (string $date) => [
+                'date' => $date,
+                'label' => Carbon::parse($date, 'Asia/Karachi')->format('D j M'),
+                'clocked_in' => $clockedIn[$date] ?? 0,
+                'replaced' => $replacedByDate[$date] ?? 0,
+            ])->values(),
+        ]);
+    }
+
     public function updateCalendar(Request $request)
+    {
+        [$validated, $userIds, $dates] = $this->calendarInput($request);
+
+        [$affected, $bulkActionId] = DB::transaction(function () use ($validated, $userIds, $dates, $request) {
+            $bulkAction = AttendanceBulkAction::available()
+                ? AttendanceBulkAction::create([
+                    'operation' => $validated['operation'],
+                    'status_code' => $validated['operation'] === 'apply' ? $validated['status_code'] : null,
+                    'start_date' => $dates->first(),
+                    'end_date' => $dates->last(),
+                    'people_count' => count($userIds),
+                    'days_count' => $dates->count(),
+                    'note' => $validated['note'] ?? null,
+                    'changed_by_user_id' => $request->user()->id,
+                ])
+                : null;
+
+            $affected = $this->applyCalendarChange($validated, $userIds, $dates, $request->user()->id, $bulkAction?->id);
+
+            if ($bulkAction) {
+                $changed = ManualAttendanceAudit::query()->where('bulk_action_id', $bulkAction->id)->count();
+                $changed > 0 ? $bulkAction->update(['cells_count' => $changed]) : $bulkAction->delete();
+            }
+
+            return [$affected, $bulkAction?->exists ? $bulkAction->id : null];
+        });
+
+        return response()->json([
+            'message' => $validated['operation'] === 'clear'
+                ? "Removed {$affected} scheduled attendance marks."
+                : "Applied attendance to {$affected} person-days.",
+            'affected' => $affected,
+            'bulk_action_id' => $bulkActionId,
+        ]);
+    }
+
+    /** @return array{0: array, 1: array<int, int>, 2: \Illuminate\Support\Collection<int, string>} */
+    private function calendarInput(Request $request): array
     {
         if (! $this->canManuallyMarkAttendance($request->user())) {
             abort(403, 'You do not have permission to schedule attendance.');
@@ -574,76 +663,76 @@ class EmployeeAttendanceController extends Controller
         $dates = collect(CarbonPeriod::create($startDate, $endDate))
             ->map(fn (Carbon $date) => $date->toDateString());
 
-        $affected = DB::transaction(function () use ($validated, $userIds, $dates, $request) {
-            if ($validated['operation'] === 'clear') {
-                $marks = ManualAttendanceMark::query()
-                    ->whereIn('user_id', $userIds)
-                    ->whereDate('attendance_date', '>=', $dates->first())
-                    ->whereDate('attendance_date', '<=', $dates->last())
-                    ->get();
+        return [$validated, $userIds, $dates];
+    }
 
-                foreach ($marks as $mark) {
+    private function applyCalendarChange(array $validated, array $userIds, $dates, int $actorId, ?int $bulkActionId): int
+    {
+        if ($validated['operation'] === 'clear') {
+            $marks = ManualAttendanceMark::query()
+                ->whereIn('user_id', $userIds)
+                ->whereDate('attendance_date', '>=', $dates->first())
+                ->whereDate('attendance_date', '<=', $dates->last())
+                ->get();
+
+            foreach ($marks as $mark) {
+                $this->recordManualAttendanceAudit(
+                    $mark->user_id,
+                    $mark->attendance_date->toDateString(),
+                    $mark->status_code,
+                    null,
+                    $actorId,
+                    $mark->note,
+                    $bulkActionId,
+                    $mark->note
+                );
+            }
+
+            ManualAttendanceMark::query()
+                ->whereIn('id', $marks->pluck('id'))
+                ->delete();
+
+            return $marks->count();
+        }
+
+        $affected = 0;
+
+        foreach ($userIds as $userId) {
+            foreach ($dates as $date) {
+                $mark = ManualAttendanceMark::query()
+                    ->where('user_id', $userId)
+                    ->whereDate('attendance_date', $date)
+                    ->first() ?? new ManualAttendanceMark([
+                        'user_id' => $userId,
+                        'attendance_date' => $date,
+                    ]);
+                $oldStatusCode = $mark->exists ? $mark->status_code : null;
+                $oldReason = $mark->exists ? $mark->note : null;
+                $newReason = $validated['note'] ?? null;
+
+                if ($oldStatusCode !== $validated['status_code'] || $oldReason !== $newReason) {
                     $this->recordManualAttendanceAudit(
-                        $mark->user_id,
-                        $mark->attendance_date->toDateString(),
-                        $mark->status_code,
-                        null,
-                        $request->user()->id,
-                        $mark->note
+                        $userId,
+                        $date,
+                        $oldStatusCode,
+                        $validated['status_code'],
+                        $actorId,
+                        $newReason,
+                        $bulkActionId,
+                        $oldReason
                     );
                 }
 
-                ManualAttendanceMark::query()
-                    ->whereIn('id', $marks->pluck('id'))
-                    ->delete();
-
-                return $marks->count();
+                $mark->fill([
+                    'marked_by_user_id' => $actorId,
+                    'status_code' => $validated['status_code'],
+                    'note' => $newReason,
+                ])->save();
+                $affected++;
             }
+        }
 
-            $affected = 0;
-
-            foreach ($userIds as $userId) {
-                foreach ($dates as $date) {
-                    $mark = ManualAttendanceMark::query()
-                        ->where('user_id', $userId)
-                        ->whereDate('attendance_date', $date)
-                        ->first() ?? new ManualAttendanceMark([
-                            'user_id' => $userId,
-                            'attendance_date' => $date,
-                        ]);
-                    $oldStatusCode = $mark->exists ? $mark->status_code : null;
-                    $oldReason = $mark->exists ? $mark->note : null;
-                    $newReason = $validated['note'] ?? null;
-
-                    if ($oldStatusCode !== $validated['status_code'] || $oldReason !== $newReason) {
-                        $this->recordManualAttendanceAudit(
-                            $userId,
-                            $date,
-                            $oldStatusCode,
-                            $validated['status_code'],
-                            $request->user()->id,
-                            $newReason
-                        );
-                    }
-
-                    $mark->fill([
-                        'marked_by_user_id' => $request->user()->id,
-                        'status_code' => $validated['status_code'],
-                        'note' => $newReason,
-                    ])->save();
-                    $affected++;
-                }
-            }
-
-            return $affected;
-        });
-
-        return response()->json([
-            'message' => $validated['operation'] === 'clear'
-                ? "Removed {$affected} scheduled attendance marks."
-                : "Applied attendance to {$affected} person-days.",
-            'affected' => $affected,
-        ]);
+        return $affected;
     }
 
     public function getManualHistory(Request $request)
@@ -685,9 +774,31 @@ class EmployeeAttendanceController extends Controller
                 'reason' => $audit->reason,
             ]);
 
+        $bulkActions = ! AttendanceBulkAction::available() ? collect() : AttendanceBulkAction::query()
+            ->with('changedBy:id,name')
+            ->whereDate('start_date', '<=', $endDate->toDateString())
+            ->whereDate('end_date', '>=', $startDate->toDateString())
+            ->latest('id')
+            ->limit(25)
+            ->get()
+            ->map(fn (AttendanceBulkAction $action) => [
+                'id' => $action->id,
+                'changed_by' => $action->changedBy?->name ?? 'System',
+                'status_label' => $action->operation === 'clear' ? 'Removed marks' : $this->statusLabel($action->status_code),
+                'people' => $action->people_count,
+                'days' => $action->days_count,
+                'cells' => $action->cells_count,
+                'range' => $action->start_date->isSameDay($action->end_date)
+                    ? $action->start_date->format('D j M')
+                    : $action->start_date->format('D j M').' to '.$action->end_date->format('D j M'),
+                'changed_at' => $action->created_at?->copy()->setTimezone('Asia/Karachi')->format('j M g:i A'),
+                'undone' => (bool) $action->undone_at,
+            ]);
+
         return response()->json([
             'month' => $month,
             'history' => $history,
+            'bulk_actions' => $bulkActions,
         ]);
     }
 
@@ -1030,9 +1141,10 @@ class EmployeeAttendanceController extends Controller
         ?ManualAttendanceMark $manualMark,
         Carbon $now,
         Carbon $today,
-        ?TimeEntry $firstClockIn
+        ?TimeEntry $firstClockIn,
+        ?string $holidayCode = null
     ): array {
-        return \App\Support\AttendanceStatus::resolve($employee, $date, $manualMark, $now, $today, $firstClockIn, 'Asia/Karachi');
+        return \App\Support\AttendanceStatus::resolve($employee, $date, $manualMark, $now, $today, $firstClockIn, 'Asia/Karachi', $holidayCode);
     }
 
     private function addStatusToSummary(array &$summary, ?string $statusCode, float|int $workHours): void
@@ -1065,9 +1177,13 @@ class EmployeeAttendanceController extends Controller
         ?string $oldStatusCode,
         ?string $newStatusCode,
         ?int $changedByUserId,
-        ?string $reason
+        ?string $reason,
+        ?int $bulkActionId = null,
+        ?string $oldNote = null
     ): void {
-        ManualAttendanceAudit::create([
+        $bulkFields = AttendanceBulkAction::available() ? ['bulk_action_id' => $bulkActionId, 'old_note' => $oldNote] : [];
+
+        ManualAttendanceAudit::create($bulkFields + [
             'user_id' => $userId,
             'attendance_date' => $attendanceDate,
             'old_status_code' => $oldStatusCode,

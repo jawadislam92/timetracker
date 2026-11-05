@@ -179,6 +179,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/employee-attendance/manual-history', [EmployeeAttendanceController::class, 'getManualHistory'])->middleware('permission:attendance.view')->name('employee-attendance.manual-history');
     Route::patch('/employee-attendance/manual-status', [EmployeeAttendanceController::class, 'updateManualStatus'])->middleware('permission:attendance.manual_mark')->name('employee-attendance.manual-status');
     Route::post('/employee-attendance/calendar', [EmployeeAttendanceController::class, 'updateCalendar'])->middleware('permission:attendance.manual_mark')->name('employee-attendance.calendar');
+    Route::post('/employee-attendance/calendar/preview', [EmployeeAttendanceController::class, 'previewCalendar'])->middleware('permission:attendance.manual_mark')->name('employee-attendance.calendar-preview');
+    Route::post('/employee-attendance/bulk-actions/{bulkAction}/undo', [\App\Http\Controllers\AttendanceSafetyController::class, 'undo'])->middleware('permission:attendance.manual_mark')->name('employee-attendance.bulk-undo');
+    Route::get('/employee-attendance/company-holidays', [\App\Http\Controllers\AttendanceSafetyController::class, 'holidays'])->middleware('permission:attendance.view')->name('employee-attendance.holidays');
+    Route::post('/employee-attendance/company-holidays', [\App\Http\Controllers\AttendanceSafetyController::class, 'storeHoliday'])->middleware('permission:attendance.manual_mark')->name('employee-attendance.holidays.store');
+    Route::delete('/employee-attendance/company-holidays/{holiday}', [\App\Http\Controllers\AttendanceSafetyController::class, 'destroyHoliday'])->middleware('permission:attendance.manual_mark')->name('employee-attendance.holidays.destroy');
     Route::post('/employee-attendance/slack', [EmployeeAttendanceController::class, 'sendSlack'])->middleware('permission:reports.send_slack')->name('employee-attendance.slack');
     Route::get('/employee-attendance/export', [EmployeeAttendanceController::class, 'export'])->middleware('permission:attendance.export')->name('employee-attendance.export');
 

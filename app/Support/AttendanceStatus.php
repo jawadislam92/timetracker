@@ -11,8 +11,9 @@ use Carbon\Carbon;
  * The single place that decides what one employee-day IS (Present, Absent,
  * Late coming, Holiday…). Extracted from EmployeeAttendanceController so the
  * monthly grid and the read-only payroll export resolve every day identically.
- * Rule order is unchanged from the grid: manual mark > future > before joining
- * > clocked in (late or present) > Sunday > today's shift not started > absent.
+ * Rule order: manual mark > company holiday (unless they clocked in or had not
+ * joined yet) > future > before joining > clocked in (late or present) > Sunday
+ * > today's shift not started > absent.
  */
 class AttendanceStatus
 {
@@ -39,6 +40,7 @@ class AttendanceStatus
         Carbon $today,
         ?TimeEntry $firstClockIn,
         string $timezone = 'Asia/Karachi',
+        ?string $holidayCode = null,
     ): array {
         if ($manualMark) {
             return [
@@ -46,6 +48,10 @@ class AttendanceStatus
                 'label' => self::CODES[$manualMark->status_code] ?? $manualMark->status_code,
                 'source' => 'manual',
             ];
+        }
+
+        if ($holidayCode && ! $firstClockIn && ! self::isBeforeJoiningDate($employee, $date)) {
+            return ['code' => $holidayCode, 'label' => self::CODES[$holidayCode] ?? $holidayCode, 'source' => 'automatic'];
         }
 
         if ($date->isFuture() && ! $date->isSameDay($today)) {

@@ -12,6 +12,8 @@ class ManualAttendanceAudit extends Model
     public const UPDATED_AT = null;
 
     protected $fillable = [
+        'bulk_action_id',
+        'old_note',
         'user_id',
         'attendance_date',
         'old_status_code',

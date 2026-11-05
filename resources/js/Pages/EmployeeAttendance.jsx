@@ -4,11 +4,16 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head } from '@inertiajs/react';
 import { useFormatters } from '@/lib/datetime';
 import SearchableMultiSelect from '@/Components/Filters/SearchableMultiSelect';
+import CompanyHolidaysDialog from '@/Components/Attendance/CompanyHolidaysDialog';
 import {
     Activity,
+    AlertTriangle,
     CalendarDays,
+    CalendarOff,
     CalendarRange,
     ChevronDown,
+    ChevronLeft,
+    ChevronRight,
     ChevronUp,
     Clock,
     Coffee,
@@ -19,6 +24,7 @@ import {
     PlayCircle,
     RotateCcw,
     Search,
+    Undo2,
     Send,
     Square,
     Timer,
@@ -32,6 +38,7 @@ import { formatHours } from '@/Utils/timeUtils';
 
 const TABS = [
     { id: 'monthly', label: 'Monthly Grid', icon: CalendarDays },
+    { id: 'weekly', label: 'Week', icon: CalendarRange },
     { id: 'summary', label: 'Summary', icon: Activity },
     { id: 'detailed', label: 'Activity', icon: List },
     { id: 'timeline', label: 'Timeline', icon: Timer },
@@ -101,6 +108,12 @@ const actionMeta = (actionType) => {
     return { label: actionType, icon: Clock, className: 'bg-slate-700/40 text-slate-300 border-slate-700' };
 };
 
+const shiftIsoDate = (iso, days) => {
+    const date = new Date(`${iso}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+};
+
 const EmployeeIdentity = ({ employee, size = 'small' }) => {
     const [imageFailed, setImageFailed] = useState(false);
     const avatarSize = size === 'large' ? 'h-11 w-11' : 'h-9 w-9';
@@ -149,6 +162,11 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
     const [showHistoryDialog, setShowHistoryDialog] = useState(false);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [manualHistory, setManualHistory] = useState([]);
+    const [bulkActions, setBulkActions] = useState([]);
+    const [undoingBulkId, setUndoingBulkId] = useState(null);
+    const [showHolidaysDialog, setShowHolidaysDialog] = useState(false);
+    const [calendarReview, setCalendarReview] = useState(null);
+    const [isReviewingCalendar, setIsReviewingCalendar] = useState(false);
     const [selectedDate, setSelectedDate] = useState(serverDate || new Date().toISOString().split('T')[0]);
     const [selectedMonth, setSelectedMonth] = useState((serverDate || new Date().toISOString().split('T')[0]).slice(0, 7));
     const [showCalendarDialog, setShowCalendarDialog] = useState(false);
@@ -174,13 +192,16 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
     const [expandedEmployees, setExpandedEmployees] = useState({});
     const [lastRefreshTime, setLastRefreshTime] = useState(null);
     const canManualMark = canManuallyMarkAttendance || monthlyGridData.canManualMark;
+    const isGridTab = activeTab === 'monthly' || activeTab === 'weekly';
+    const historyMonth = activeTab === 'weekly' ? selectedDate.slice(0, 7) : selectedMonth;
 
     const fetchAttendanceData = async () => {
         setLoading(true);
 
         try {
-            if (activeTab === 'monthly') {
-                const response = await axios.get('/employee-attendance/monthly', { params: { month: selectedMonth, ...(shiftIds.length ? { shift_ids: shiftIds } : {}) } });
+            if (isGridTab) {
+                const period = activeTab === 'weekly' ? { week: selectedDate } : { month: selectedMonth };
+                const response = await axios.get('/employee-attendance/monthly', { params: { ...period, ...(shiftIds.length ? { shift_ids: shiftIds } : {}) } });
                 setMonthlyGridData({
                     days: response.data.days || [],
                     employees: response.data.employees || [],
@@ -296,9 +317,10 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
     };
 
     const openCalendarDialog = () => {
-        const defaultDate = selectedMonth === selectedDate.slice(0, 7)
+        const defaultDate = activeTab === 'weekly' || selectedMonth === selectedDate.slice(0, 7)
             ? selectedDate
             : `${selectedMonth}-01`;
+        setCalendarReview(null);
         setCalendarOperation('apply');
         setCalendarScope('company');
         setCalendarUserIds(monthlyGridData.employees.map((employee) => String(employee.user_id)));
@@ -341,22 +363,40 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
         monthlyGridData.employees.length,
     ]);
 
+    const calendarPayload = () => ({
+        operation: calendarOperation,
+        scope: calendarScope,
+        user_ids: calendarScope === 'selected' ? calendarUserIds : [],
+        start_date: calendarStartDate,
+        end_date: calendarEndDate,
+        status_code: calendarOperation === 'apply' ? calendarStatus : null,
+        note: calendarOperation === 'apply' ? calendarNote : null,
+    });
+
+    const reviewAttendanceCalendar = async () => {
+        setIsReviewingCalendar(true);
+
+        try {
+            const response = await axios.post('/employee-attendance/calendar/preview', calendarPayload());
+            setCalendarReview(response.data);
+        } catch (error) {
+            console.error('Attendance calendar preview failed:', error);
+            const errors = error.response?.data?.errors || {};
+            showError(errors.user_ids?.[0] || errors.start_date?.[0] || errors.end_date?.[0] || errors.status_code?.[0] || 'Unable to review this change.');
+        } finally {
+            setIsReviewingCalendar(false);
+        }
+    };
+
     const updateAttendanceCalendar = async () => {
         setIsUpdatingCalendar(true);
 
         try {
-            const response = await axios.post('/employee-attendance/calendar', {
-                operation: calendarOperation,
-                scope: calendarScope,
-                user_ids: calendarScope === 'selected' ? calendarUserIds : [],
-                start_date: calendarStartDate,
-                end_date: calendarEndDate,
-                status_code: calendarOperation === 'apply' ? calendarStatus : null,
-                note: calendarOperation === 'apply' ? calendarNote : null,
-            });
+            const response = await axios.post('/employee-attendance/calendar', calendarPayload());
 
             toast.success(response.data?.message || 'Attendance calendar updated.');
             setShowCalendarDialog(false);
+            setCalendarReview(null);
             await fetchAttendanceData();
             if (showHistoryDialog) await fetchManualHistory();
         } catch (error) {
@@ -379,9 +419,10 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
 
         try {
             const response = await axios.get('/employee-attendance/manual-history', {
-                params: { month: selectedMonth },
+                params: { month: historyMonth },
             });
             setManualHistory(response.data.history || []);
+            setBulkActions(response.data.bulk_actions || []);
         } catch (error) {
             console.error('Manual attendance history load failed:', error);
             showError('Unable to load attendance history.');
@@ -397,7 +438,22 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
 
     useEffect(() => {
         if (showHistoryDialog) fetchManualHistory();
-    }, [selectedMonth]);
+    }, [historyMonth]);
+
+    const undoBulkAction = async (action) => {
+        setUndoingBulkId(action.id);
+
+        try {
+            const response = await axios.post(`/employee-attendance/bulk-actions/${action.id}/undo`);
+            toast.success(response.data?.message || 'Change undone.');
+            await Promise.all([fetchAttendanceData(), fetchManualHistory()]);
+        } catch (error) {
+            console.error('Attendance undo failed:', error);
+            showError(error.response?.data?.errors?.bulk_action?.[0] || 'Unable to undo this change.');
+        } finally {
+            setUndoingBulkId(null);
+        }
+    };
 
     const openSlackDialog = () => {
         setSlackUserIds(monthlyGridData.employees.map((employee) => String(employee.user_id)));
@@ -487,7 +543,7 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
     const filteredMonthlyEmployees = monthlyGridData.employees.filter(matchesSearch);
 
     const summaryMetrics = useMemo(() => {
-        if (activeTab === 'monthly') {
+        if (isGridTab) {
             const totals = monthlyGridData.employees.reduce((carry, employee) => {
                 carry.present += employee.summary?.present || 0;
                 carry.absent += employee.summary?.absent || 0;
@@ -500,7 +556,7 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                 { label: 'Present Days', value: totals.present, icon: PlayCircle, color: 'text-emerald-300', bg: 'bg-emerald-500/15' },
                 { label: 'Absent Days', value: totals.absent, icon: Square, color: 'text-rose-300', bg: 'bg-rose-500/15' },
                 { label: 'Leave Days', value: totals.leave, icon: Coffee, color: 'text-amber-300', bg: 'bg-amber-500/15' },
-                { label: 'Month Hours', value: formatHours(totals.hours), icon: Timer, color: 'text-blue-300', bg: 'bg-blue-500/15' },
+                { label: activeTab === 'weekly' ? 'Week Hours' : 'Month Hours', value: formatHours(totals.hours), icon: Timer, color: 'text-blue-300', bg: 'bg-blue-500/15' },
             ];
         }
 
@@ -554,6 +610,29 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
+                            {activeTab === 'weekly' && monthlyGridData.days.length > 0 && (
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedDate(shiftIsoDate(selectedDate, -7))}
+                                        aria-label="Previous week"
+                                        className="rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800"
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                    </button>
+                                    <span className="min-w-36 text-center text-sm font-semibold text-slate-200">
+                                        {monthlyGridData.days[0].day} {monthlyGridData.days[0].month_label} to {monthlyGridData.days[monthlyGridData.days.length - 1].day} {monthlyGridData.days[monthlyGridData.days.length - 1].month_label}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedDate(shiftIsoDate(selectedDate, 7))}
+                                        aria-label="Next week"
+                                        className="rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800"
+                                    >
+                                        <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            )}
                             <label className="relative">
                                 <CalendarDays className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 {activeTab === 'monthly' ? (
@@ -572,8 +651,16 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                     />
                                 )}
                             </label>
-                            {canManualMark && activeTab === 'monthly' && (
+                            {canManualMark && isGridTab && (
                                 <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowHolidaysDialog(true)}
+                                        className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                                    >
+                                        <CalendarOff className="h-4 w-4" />
+                                        Company holidays
+                                    </button>
                                     <button
                                         type="button"
                                         onClick={openCalendarDialog}
@@ -602,7 +689,7 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                     Send to Slack
                                 </button>
                             )}
-                            {canExport && activeTab !== 'monthly' && (
+                            {canExport && !isGridTab && (
                                 <button
                                     type="button"
                                     onClick={downloadCSV}
@@ -636,7 +723,7 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
 
                     <section className="rounded-lg border border-slate-800 bg-slate-900 shadow-sm">
                         <div className="flex flex-col gap-4 border-b border-slate-800 p-4 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="grid w-full grid-cols-2 gap-1 rounded-lg bg-slate-950/60 p-1 sm:grid-cols-4 lg:inline-flex lg:w-auto">
+                            <div className="grid w-full grid-cols-2 gap-1 rounded-lg bg-slate-950/60 p-1 sm:grid-cols-5 lg:inline-flex lg:w-auto">
                                 {TABS.map((tab) => {
                                     const Icon = tab.icon;
                                     return (
@@ -701,15 +788,16 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                             </div>
                         ) : (
                             <>
-                                {activeTab === 'monthly' && (
+                                {isGridTab && (
                                     filteredMonthlyEmployees.length === 0
-                                        ? renderEmpty('No attendance records', 'No employees match the selected month and search.')
+                                        ? renderEmpty('No attendance records', `No employees match the selected ${activeTab === 'weekly' ? 'week' : 'month'} and search.`)
                                         : (
                                             <MonthlyAttendanceGrid
                                                 days={monthlyGridData.days}
                                                 employees={filteredMonthlyEmployees}
                                                 statusOptions={monthlyGridData.statusOptions}
                                                 canManualMark={canManualMark}
+                                                showHours={activeTab === 'weekly'}
                                                 markingCell={markingCell}
                                                 onStatusChange={updateManualStatus}
                                             />
@@ -970,6 +1058,9 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                             </button>
                         </div>
 
+                        {calendarReview ? (
+                            <CalendarReview review={calendarReview} />
+                        ) : (
                         <div className="space-y-5 overflow-y-auto px-5 py-4">
                             <fieldset>
                                 <legend className="text-sm font-semibold text-slate-300">Action</legend>
@@ -1001,8 +1092,9 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                         type="date"
                                         value={calendarStartDate}
                                         onChange={(event) => {
+                                            // The end date follows, so picking one day means one day.
                                             setCalendarStartDate(event.target.value);
-                                            if (calendarEndDate < event.target.value) setCalendarEndDate(event.target.value);
+                                            setCalendarEndDate(event.target.value);
                                         }}
                                         className="w-full rounded-lg border-slate-700 bg-slate-900 text-sm text-slate-200 [color-scheme:dark] focus:border-orange-500 focus:ring-orange-500"
                                     />
@@ -1120,21 +1212,40 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                         : 'Existing manual marks in the selected range will be replaced with this status.'}
                                 </p>
                             </div>
+                            {calendarOperation === 'apply' && calendarScope === 'company' && ['H', 'PH'].includes(calendarStatus) && (
+                                <p className="text-xs leading-5 text-slate-400">
+                                    Giving everyone a day off?{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowCalendarDialog(false);
+                                            setShowHolidaysDialog(true);
+                                        }}
+                                        className="font-semibold text-orange-400 hover:text-orange-300"
+                                    >
+                                        Use Company holidays
+                                    </button>
+                                    {' '}instead. It covers new joiners and never hides a real clock-in.
+                                </p>
+                            )}
                         </div>
+                        )}
 
                         <div className="flex flex-col-reverse gap-2 border-t border-slate-800 px-5 py-4 sm:flex-row sm:justify-end">
                             <button
                                 type="button"
-                                onClick={() => setShowCalendarDialog(false)}
+                                onClick={() => (calendarReview ? setCalendarReview(null) : setShowCalendarDialog(false))}
                                 className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"
                             >
-                                Cancel
+                                {calendarReview ? 'Back' : 'Cancel'}
                             </button>
                             <button
                                 type="button"
-                                onClick={updateAttendanceCalendar}
+                                onClick={calendarReview ? updateAttendanceCalendar : reviewAttendanceCalendar}
                                 disabled={
                                     isUpdatingCalendar
+                                    || isReviewingCalendar
+                                    || (calendarReview && calendarReview.cells === 0)
                                     || calendarPreview.personDays === 0
                                     || (calendarScope === 'selected' && calendarUserIds.length === 0)
                                 }
@@ -1146,9 +1257,13 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                             >
                                 {isUpdatingCalendar
                                     ? 'Updating...'
-                                    : calendarOperation === 'clear'
-                                        ? 'Remove marks'
-                                        : 'Apply status'}
+                                    : isReviewingCalendar
+                                        ? 'Checking...'
+                                        : !calendarReview
+                                            ? 'Review change'
+                                            : calendarOperation === 'clear'
+                                                ? 'Confirm and remove'
+                                                : 'Confirm and apply'}
                             </button>
                         </div>
                     </div>
@@ -1179,13 +1294,47 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                     <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-700 border-t-orange-500" />
                                     Loading audit history...
                                 </div>
-                            ) : manualHistory.length === 0 ? (
+                            ) : manualHistory.length === 0 && bulkActions.length === 0 ? (
                                 <div className="py-12 text-center">
                                     <History className="mx-auto h-10 w-10 text-slate-500" />
                                     <h3 className="mt-3 font-semibold text-slate-100">No manual changes</h3>
                                     <p className="mt-1 text-sm text-slate-400">No manual attendance edits were recorded for this month.</p>
                                 </div>
                             ) : (
+                                <div className="space-y-5">
+                                {bulkActions.length > 0 && (
+                                    <section>
+                                        <h3 className="mb-2 text-sm font-semibold text-slate-300">Bulk changes</h3>
+                                        <ul className="divide-y divide-slate-800 rounded-lg border border-slate-800">
+                                            {bulkActions.map((action) => (
+                                                <li key={action.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                                                    <div className="min-w-0">
+                                                        <div className="text-sm font-semibold text-slate-100">
+                                                            {action.status_label} · {action.people} {action.people === 1 ? 'person' : 'people'} × {action.days} {action.days === 1 ? 'day' : 'days'}
+                                                        </div>
+                                                        <div className="text-xs text-slate-400">
+                                                            {action.range} · {action.cells} {action.cells === 1 ? 'cell' : 'cells'} changed · {action.changed_by}, {action.changed_at}
+                                                        </div>
+                                                    </div>
+                                                    {action.undone ? (
+                                                        <span className="rounded-full bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-400">Undone</span>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            disabled={undoingBulkId !== null}
+                                                            onClick={() => undoBulkAction(action)}
+                                                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-orange-500 hover:bg-orange-500/10 hover:text-orange-300 disabled:opacity-50"
+                                                        >
+                                                            <Undo2 className="h-3.5 w-3.5" />
+                                                            {undoingBulkId === action.id ? 'Undoing...' : 'Undo'}
+                                                        </button>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </section>
+                                )}
+                                {manualHistory.length > 0 && (
                                 <div className="overflow-x-auto rounded-lg border border-slate-800">
                                     <table className="min-w-full divide-y divide-slate-800 text-sm">
                                         <thead className="bg-slate-950">
@@ -1220,6 +1369,8 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                         </tbody>
                                     </table>
                                 </div>
+                                )}
+                                </div>
                             )}
                         </div>
 
@@ -1234,6 +1385,14 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                         </div>
                     </div>
                 </div>
+            )}
+
+            {showHolidaysDialog && (
+                <CompanyHolidaysDialog
+                    initialDate={selectedDate}
+                    onClose={() => setShowHolidaysDialog(false)}
+                    onChanged={fetchAttendanceData}
+                />
             )}
 
             {showSlackDialog && (
@@ -1418,7 +1577,61 @@ function AccordionList({ items, expandedEmployees, toggleEmployee, setAllExpande
     );
 }
 
-function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, markingCell, onStatusChange }) {
+const MAX_NAMED_DAYS = 14;
+
+function CalendarReview({ review }) {
+    const clear = review.operation === 'clear';
+    const named = review.days.slice(0, MAX_NAMED_DAYS).map((day) => day.label).join(', ');
+    const extra = review.days.length - MAX_NAMED_DAYS;
+    const dayList = extra > 0 ? `${named} and ${extra} more` : named;
+    const peopleLabel = `${review.people} ${review.people === 1 ? 'person' : 'people'}`;
+    const clockIns = review.days.filter((day) => day.clocked_in > 0);
+
+    return (
+        <div className="space-y-4 overflow-y-auto px-5 py-4">
+            <div className={`rounded-lg border px-4 py-3 ${clear ? 'border-rose-500/30 bg-rose-500/10' : 'border-blue-500/30 bg-blue-500/10'}`}>
+                <p className="text-base font-bold leading-7 text-white">
+                    {clear
+                        ? `Remove ${review.cells} manual ${review.cells === 1 ? 'mark' : 'marks'} on ${dayList} for ${peopleLabel}`
+                        : `${review.status_label} on ${dayList} for ${peopleLabel}`}
+                </p>
+                <p className="mt-1 text-xs text-slate-300">
+                    {review.days.length} {review.days.length === 1 ? 'day' : 'days'} · {review.cells} {review.cells === 1 ? 'cell' : 'cells'}
+                </p>
+            </div>
+
+            {review.cells === 0 && (
+                <p className="text-sm text-slate-300">There is nothing to remove in this range.</p>
+            )}
+
+            {!clear && clockIns.length > 0 && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                    <div className="flex items-center gap-2 text-sm font-bold text-amber-200">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        This hides real attendance
+                    </div>
+                    <ul className="mt-2 space-y-1 text-sm text-amber-100">
+                        {clockIns.slice(0, MAX_NAMED_DAYS).map((day) => (
+                            <li key={day.date}>
+                                {day.clocked_in} {day.clocked_in === 1 ? 'person' : 'people'} already clocked in on {day.label}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {!clear && review.replaced > 0 && (
+                <p className="text-sm text-slate-300">
+                    {review.replaced} existing manual {review.replaced === 1 ? 'mark' : 'marks'} will be replaced.
+                </p>
+            )}
+
+            {review.cells > 0 && <p className="text-xs text-slate-400">You can undo this afterwards from Audit history.</p>}
+        </div>
+    );
+}
+
+function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, showHours = false, markingCell, onStatusChange }) {
     const [openCell, setOpenCell] = useState(null);
     const [menuPosition, setMenuPosition] = useState(null);
     const summaryColumns = [
@@ -1512,12 +1725,16 @@ function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, 
                         {days.map((day) => (
                             <th
                                 key={day.date}
-                                className={`min-w-11 border-b border-r border-slate-800 px-2 py-2 text-center text-xs font-bold uppercase ${
-                                    day.is_weekend ? 'bg-sky-500/15 text-sky-300' : 'bg-slate-950 text-slate-300'
+                                title={day.holiday || undefined}
+                                className={`${showHours ? 'min-w-24' : 'min-w-11'} border-b border-r border-slate-800 px-2 py-2 text-center text-xs font-bold uppercase ${
+                                    day.holiday
+                                        ? 'bg-violet-500/15 text-violet-300'
+                                        : day.is_weekend ? 'bg-sky-500/15 text-sky-300' : 'bg-slate-950 text-slate-300'
                                 }`}
                             >
                                 <div>{day.weekday}</div>
-                                <div className="mt-1 text-sm">{day.day}</div>
+                                <div className="mt-1 text-sm">{day.day}{showHours ? ` ${day.month_label}` : ''}</div>
+                                {showHours && day.holiday && <div className="mx-auto mt-1 max-w-24 truncate text-[10px] font-medium normal-case">{day.holiday}</div>}
                             </th>
                         ))}
                         {summaryColumns.map((column) => (
@@ -1549,7 +1766,7 @@ function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, 
 
                                 return (
                                     <td key={cell.date} className="relative border-b border-r border-slate-800 p-1 text-center">
-                                        <div className={`relative flex h-9 min-w-10 items-center justify-center rounded border text-xs font-bold ${statusClass}`} title={titleParts.join(' | ')}>
+                                        <div className={`relative flex ${showHours ? 'h-12 min-w-20' : 'h-9 min-w-10'} items-center justify-center rounded border text-xs font-bold ${statusClass}`} title={titleParts.join(' | ')}>
                                             {canManualMark ? (
                                                 <button
                                                     type="button"
@@ -1562,9 +1779,13 @@ function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, 
                                                     data-attendance-trigger
                                                 >
                                                     {loading ? '...' : statusCode || '-'}
+                                                    {showHours && cell.work_hours > 0 && <span className="block text-[10px] font-medium opacity-80">{formatHours(cell.work_hours)}</span>}
                                                 </button>
                                             ) : (
-                                                <span>{statusCode || '-'}</span>
+                                                <span>
+                                                    {statusCode || '-'}
+                                                    {showHours && cell.work_hours > 0 && <span className="block text-[10px] font-medium opacity-80">{formatHours(cell.work_hours)}</span>}
+                                                </span>
                                             )}
                                             {isManual && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-white ring-1 ring-slate-500" />}
                                         </div>

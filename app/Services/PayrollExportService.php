@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CompanyHoliday;
 use App\Models\ManualAttendanceMark;
 use App\Models\TimeEntry;
 use App\Models\TrackingSession;
@@ -86,6 +87,7 @@ class PayrollExportService
             ->whereBetween('attendance_date', [$startDate->toDateString(), $endDate->toDateString()])
             ->get()
             ->keyBy(fn (ManualAttendanceMark $m) => $m->user_id.'|'.$m->attendance_date->toDateString());
+        $holidays = CompanyHoliday::between($startDate, $endDate);
 
         // One query for the month's sessions (a day before and after, for
         // overnight spill), then each day takes its wall-clock share.
@@ -98,18 +100,18 @@ class PayrollExportService
             ->get()
             ->groupBy('user_id');
 
-        $out = $users->map(function (User $user) use ($dates, $entriesByUserDate, $marks, $sessionsByUser, $now, $today) {
+        $out = $users->map(function (User $user) use ($dates, $entriesByUserDate, $marks, $holidays, $sessionsByUser, $now, $today) {
             $summary = ['present' => 0, 'absent' => 0, 'leave' => 0, 'half_day' => 0, 'work_from_home' => 0, 'late_coming' => 0, 'late_joining' => 0, 'holidays' => 0, 'public_holiday' => 0, 'total_work_hours' => 0];
             $userSessions = $sessionsByUser->get($user->id, collect());
 
-            $days = $dates->map(function (Carbon $date) use ($user, $entriesByUserDate, $marks, $userSessions, $now, $today, &$summary) {
+            $days = $dates->map(function (Carbon $date) use ($user, $entriesByUserDate, $marks, $holidays, $userSessions, $now, $today, &$summary) {
                 $key = $user->id.'|'.$date->toDateString();
                 $entries = $entriesByUserDate->get($key, collect());
                 $mark = $marks->get($key);
                 $firstClockIn = $entries->firstWhere('action_type', 'clock_in');
                 $lastClockOut = $entries->where('action_type', 'clock_out')->last();
 
-                $status = AttendanceStatus::resolve($user, $date, $mark, $now, $today, $firstClockIn, self::TZ);
+                $status = AttendanceStatus::resolve($user, $date, $mark, $now, $today, $firstClockIn, self::TZ, ($holidays[$date->toDateString()] ?? null)?->status_code);
                 $inOfficeHours = $entries->isNotEmpty() ? AttendanceHours::dayInOfficeHours($entries) : 0.0;
                 AttendanceStatus::addToSummary($summary, $status['code'], $inOfficeHours);
 
