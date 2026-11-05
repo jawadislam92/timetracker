@@ -114,7 +114,7 @@ const shiftIsoDate = (iso, days) => {
     return date.toISOString().slice(0, 10);
 };
 
-const EmployeeIdentity = ({ employee, size = 'small' }) => {
+const EmployeeIdentity = ({ employee, size = 'small', compact = false }) => {
     const [imageFailed, setImageFailed] = useState(false);
     const avatarSize = size === 'large' ? 'h-11 w-11' : 'h-9 w-9';
 
@@ -128,11 +128,11 @@ const EmployeeIdentity = ({ employee, size = 'small' }) => {
                 <img
                     src={employee.avatar}
                     alt=""
-                    className={`${avatarSize} shrink-0 rounded-full object-cover`}
+                    className={`${avatarSize} ${compact ? 'hidden sm:block' : ''} shrink-0 rounded-full object-cover`}
                     onError={() => setImageFailed(true)}
                 />
             ) : (
-                <span className={`flex ${avatarSize} shrink-0 items-center justify-center rounded-full bg-slate-700 text-sm font-bold text-slate-200`}>
+                <span className={`${compact ? 'hidden sm:flex' : 'flex'} ${avatarSize} shrink-0 items-center justify-center rounded-full bg-slate-700 text-sm font-bold text-slate-200`}>
                     {employee.user_name.charAt(0).toUpperCase()}
                 </span>
             )}
@@ -148,7 +148,8 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
     const { formatTime } = useFormatters();
     const canExport = auth.user?.is_super_admin || auth.user?.permissions?.includes('attendance.export');
     const canSendSlack = canSendAttendanceSlack || auth.user?.is_super_admin || auth.user?.permissions?.includes('reports.send_slack');
-    const [activeTab, setActiveTab] = useState('monthly');
+    // A month of cells can't fit a phone, so phones open on one week.
+    const [activeTab, setActiveTab] = useState(() => (window.innerWidth < 640 ? 'weekly' : 'monthly'));
     const [employeesData, setEmployeesData] = useState([]);
     const [detailedActivityData, setDetailedActivityData] = useState([]);
     const [timelineData, setTimelineData] = useState([]);
@@ -833,8 +834,14 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                                                 </td>
                                                                 <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-100">{formatHours(employee.total_work_hours)}</td>
                                                                 <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{formatHours(employee.total_break_hours)}</td>
-                                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{employee.first_clock_in || '-'}</td>
-                                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{employee.last_action_time || '-'}</td>
+                                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
+                                                                    {employee.first_clock_in || '-'}
+                                                                    {employee.clock_in_via && <span className="block text-xs text-slate-500">{employee.clock_in_via}</span>}
+                                                                </td>
+                                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
+                                                                    {employee.last_action_time || '-'}
+                                                                    {employee.clock_out_via && <span className="block text-xs text-slate-500">Out: {employee.clock_out_via}</span>}
+                                                                </td>
                                                                 <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
                                                                     <div className="flex items-center gap-3">
                                                                         <span>{employee.total_entries}</span>
@@ -879,7 +886,7 @@ export default function EmployeeAttendance({ auth, serverDate, shiftOptions = []
                                                                     </span>
                                                                     <div className="flex-1">
                                                                         <div className="text-sm font-semibold text-slate-100">{meta.label}</div>
-                                                                        <div className="text-xs text-slate-500">{entry.action_iso ? formatTime(entry.action_iso) : entry.formatted_time}</div>
+                                                                        <div className="text-xs text-slate-500">{entry.action_iso ? formatTime(entry.action_iso) : entry.formatted_time}{entry.source_label ? ` · ${entry.source_label}` : ''}</div>
                                                                     </div>
                                                                     {entry.notes && <div className="text-sm text-slate-300">{entry.notes}</div>}
                                                                 </div>
@@ -1719,14 +1726,14 @@ function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, 
             <table className="min-w-max border-separate border-spacing-0 text-sm">
                 <thead>
                     <tr>
-                        <th className="sticky left-0 z-20 min-w-56 border-b border-r border-slate-800 bg-slate-950 px-4 py-3 text-left text-xs font-bold uppercase text-slate-300">
+                        <th className="sticky left-0 z-20 w-28 max-w-28 border-b border-r border-slate-800 bg-slate-950 px-2 py-3 text-left text-xs font-bold uppercase text-slate-300 sm:w-auto sm:min-w-56 sm:max-w-none sm:px-4">
                             Employee
                         </th>
                         {days.map((day) => (
                             <th
                                 key={day.date}
                                 title={day.holiday || undefined}
-                                className={`${showHours ? 'min-w-24' : 'min-w-11'} border-b border-r border-slate-800 px-2 py-2 text-center text-xs font-bold uppercase ${
+                                className={`${showHours ? 'min-w-16 sm:min-w-24' : 'min-w-11'} border-b border-r border-slate-800 px-2 py-2 text-center text-xs font-bold uppercase ${
                                     day.holiday
                                         ? 'bg-violet-500/15 text-violet-300'
                                         : day.is_weekend ? 'bg-sky-500/15 text-sky-300' : 'bg-slate-950 text-slate-300'
@@ -1747,8 +1754,8 @@ function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, 
                 <tbody>
                     {employees.map((employee) => (
                         <tr key={employee.user_id} className="group">
-                            <td className="sticky left-0 z-10 border-b border-r border-slate-800 bg-slate-900 px-4 py-2 group-hover:bg-slate-800/60">
-                                <EmployeeIdentity employee={employee} />
+                            <td className="sticky left-0 z-10 w-28 max-w-28 border-b border-r border-slate-800 bg-slate-900 px-2 py-2 group-hover:bg-slate-800/60 sm:w-auto sm:max-w-none sm:px-4">
+                                <EmployeeIdentity employee={employee} compact />
                             </td>
                             {employee.days.map((cell) => {
                                 const cellKey = `${employee.user_id}-${cell.date}`;
@@ -1766,7 +1773,7 @@ function MonthlyAttendanceGrid({ days, employees, statusOptions, canManualMark, 
 
                                 return (
                                     <td key={cell.date} className="relative border-b border-r border-slate-800 p-1 text-center">
-                                        <div className={`relative flex ${showHours ? 'h-12 min-w-20' : 'h-9 min-w-10'} items-center justify-center rounded border text-xs font-bold ${statusClass}`} title={titleParts.join(' | ')}>
+                                        <div className={`relative flex ${showHours ? 'h-12 min-w-14 sm:min-w-20' : 'h-9 min-w-10'} items-center justify-center rounded border text-xs font-bold ${statusClass}`} title={titleParts.join(' | ')}>
                                             {canManualMark ? (
                                                 <button
                                                     type="button"

@@ -233,6 +233,16 @@ export default function Authenticated({ user, header, children }) {
                             </Dropdown>
                         </div>
 
+                        {canCreateManualWorkHour && (
+                            <Link
+                                href={route('work-hours.create')}
+                                aria-label="Add Manual Time"
+                                className="ml-auto mr-2 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-orange-500 to-amber-500 text-white sm:hidden"
+                            >
+                                <Plus className="h-5 w-5" />
+                            </Link>
+                        )}
+
                         <button
                             onClick={() => setShowingNavigationDropdown((previousState) => !previousState)}
                             className="inline-flex items-center justify-center rounded-lg p-2 text-slate-300 transition hover:bg-white/10 hover:text-white lg:hidden"
@@ -344,7 +354,7 @@ export default function Authenticated({ user, header, children }) {
                 </header>
             )}
 
-            <main>{children}</main>
+            <main className="pb-20 lg:pb-0">{children}</main>
 
             {/* Floating AI chat — only for people granted the AI permission
                 (each question costs API credit). */}

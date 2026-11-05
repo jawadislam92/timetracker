@@ -881,6 +881,8 @@ class EmployeeAttendanceController extends Controller
                 'current_status' => $stats['status'],
                 'first_clock_in' => $firstClockIn ? $firstClockIn->formatted_action_time : null,
                 'last_action_time' => $lastEntry ? $lastEntry->formatted_action_time : null,
+                'clock_in_via' => \App\Support\ClockSource::label($firstClockIn?->clock_source),
+                'clock_out_via' => \App\Support\ClockSource::label($entries->where('action_type', 'clock_out')->last()?->clock_source),
                 'total_entries' => $entries->count(),
             ];
         })->filter()->values();
@@ -926,6 +928,7 @@ class EmployeeAttendanceController extends Controller
                             ? Carbon::parse($entry->action_timestamp)->toISOString()
                             : null,
                         'notes' => $entry->notes,
+                        'source_label' => \App\Support\ClockSource::label($entry->clock_source),
                     ];
                 }),
             ];

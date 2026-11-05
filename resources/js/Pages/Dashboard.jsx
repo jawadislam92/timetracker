@@ -848,8 +848,9 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
             <Head title="Dashboard" />
 
             <div className="min-h-screen bg-slate-950">
-                <div className="mx-auto max-w-none space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-                    <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-6 py-6 shadow-xl shadow-slate-950/20">
+                {/* On phones the clock buttons sit right under the greeting. */}
+                <div className="mx-auto flex max-w-none flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+                    <section className="relative -order-2 overflow-hidden rounded-2xl lg:order-none border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-6 py-6 shadow-xl shadow-slate-950/20">
                         <div className="pointer-events-none absolute -top-24 right-10 h-56 w-56 rounded-full bg-orange-500/15 blur-3xl" aria-hidden="true" />
                         <div className="pointer-events-none absolute -bottom-32 left-1/3 h-56 w-72 rounded-full bg-amber-500/10 blur-3xl" aria-hidden="true" />
                         <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -862,7 +863,7 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
                             <div className="flex flex-wrap items-center gap-3">
                                 <Link
                                     href={route('desktop-downloads.index')}
-                                    className="inline-flex items-center gap-2 rounded-lg border border-orange-500/40 bg-orange-500/15 px-3 py-2 text-sm font-semibold text-orange-300 transition hover:bg-orange-500/25"
+                                    className="hidden items-center sm:inline-flex gap-2 rounded-lg border border-orange-500/40 bg-orange-500/15 px-3 py-2 text-sm font-semibold text-orange-300 transition hover:bg-orange-500/25"
                                     title="Download the SA Track desktop app — installable on any PC without signing in"
                                 >
                                     <Download className="h-4 w-4" />
@@ -961,13 +962,13 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
                         })}
                     </section>
 
-                    <section className="rounded-lg border border-slate-800 bg-slate-900 shadow-sm">
+                    <section className="-order-1 rounded-lg border border-slate-800 bg-slate-900 shadow-sm lg:order-none">
                         <div className="flex flex-col gap-3 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <h2 className="text-base font-bold text-white">Time Tracking</h2>
                                 <p className="text-sm text-slate-400">Last action: {actionLabel(todayStats.lastAction)}</p>
                             </div>
-                            <div className="text-sm text-slate-400">Available actions follow your current status.</div>
+                            <div className="hidden text-sm text-slate-400 sm:block">Available actions follow your current status.</div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-4">

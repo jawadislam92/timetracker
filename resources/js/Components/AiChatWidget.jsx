@@ -78,7 +78,7 @@ export default function AiChatWidget() {
                     type="button"
                     onClick={() => setOpen(true)}
                     title="Ask the AI Assistant"
-                    className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-xl shadow-orange-500/40 transition hover:scale-105 hover:from-orange-600 hover:to-amber-600"
+                    className="fixed bottom-4 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full sm:bottom-5 sm:right-5 sm:h-14 sm:w-14 bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-xl shadow-orange-500/40 transition hover:scale-105 hover:from-orange-600 hover:to-amber-600"
                 >
                     <Sparkles className="h-6 w-6" />
                 </button>

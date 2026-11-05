@@ -36,6 +36,12 @@ class TimeEntry extends Model
      */
     protected static function booted(): void
     {
+        static::creating(function (self $entry) {
+            if (\App\Support\ClockSource::available() && ! $entry->clock_source) {
+                $entry->clock_source = \App\Support\ClockSource::detect($entry->notes);
+            }
+        });
+
         static::created(function (self $entry) {
             // Diagnostic capture: if a clock punch is filed on the wrong
             // attendance day, snapshot the request + call path + clock state so

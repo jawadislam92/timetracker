@@ -855,7 +855,40 @@ export default function WorkHoursReport({
                                     )}
                                 </table>
                             ) : (
-                                <table className="min-w-full divide-y divide-slate-800">
+                                <>
+                                <div className="divide-y divide-slate-800 md:hidden">
+                                    {entries.length === 0 ? (
+                                        <div className="px-4 py-10 text-center">
+                                            <h3 className="text-base font-medium text-white">No data found</h3>
+                                            <p className="mt-1 text-sm text-slate-400">Try adjusting your filters</p>
+                                        </div>
+                                    ) : entries.map((entry) => (
+                                        <div key={entry.id} className="space-y-1 px-4 py-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-sm font-semibold text-slate-100">{entry.user?.name || 'N/A'}</div>
+                                                    <div className="truncate text-sm text-slate-300">{entry.client?.name || 'No Client'}</div>
+                                                </div>
+                                                <div className="shrink-0 text-right">
+                                                    <div className="text-base font-bold text-emerald-400">{timeFormat(entry.hours)}</div>
+                                                    <div className="text-xs text-slate-400">{entry.date}</div>
+                                                </div>
+                                            </div>
+                                            <div className="inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-200">
+                                                <span className="h-1.5 w-1.5 rounded-full" style={{ background: TYPE_DOT[entry.work_type] ?? '#94a3b8' }} />
+                                                {formatWorkType(entry.work_type)}
+                                            </div>
+                                            {entry.description && <p className="line-clamp-2 text-sm text-slate-400">{entry.description}</p>}
+                                        </div>
+                                    ))}
+                                    {entries.length > 0 && (
+                                        <div className="flex items-center justify-between bg-slate-950 px-4 py-3">
+                                            <span className="text-sm font-bold text-slate-100">Total{workHours?.last_page > 1 ? ' (all pages)' : ''}</span>
+                                            <span className="text-lg font-bold text-emerald-400">{fmtH(totals.hours)}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                <table className="hidden min-w-full divide-y divide-slate-800 md:table">
                                     <thead className="bg-slate-950">
                                         <tr>
                                             {entryCols.map((c, i) => (
@@ -892,6 +925,7 @@ export default function WorkHoursReport({
                                         </tfoot>
                                     )}
                                 </table>
+                                </>
                             )}
                         </div>
 

@@ -616,7 +616,54 @@ export default function WorkHoursList({
 
                     {/* Table Card */}
                     <div className="rounded-lg border border-slate-800 bg-slate-900 shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto">
+                        <div className="divide-y divide-slate-800 md:hidden">
+                            {filteredData.length === 0 ? (
+                                <div className="px-4 py-10 text-center">
+                                    <h3 className="text-base font-medium text-white">No work hours found</h3>
+                                    <p className="mt-1 text-sm text-slate-400">Start tracking your work hours</p>
+                                </div>
+                            ) : filteredData.map((entry) => (
+                                <div key={entry.id} className="space-y-2 px-4 py-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="text-sm font-medium text-slate-100">{entry.date}</div>
+                                            <div className="truncate text-sm text-slate-300">{entry.client?.name || 'No Client'}</div>
+                                        </div>
+                                        <div className="shrink-0 text-base font-bold text-emerald-400">{timeFormat(entry.hours)}</div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="rounded bg-purple-500/15 px-2 py-0.5 text-xs font-medium text-purple-300">{formatWorkType(entry.work_type)}</span>
+                                        {entry.tracker && <span className="rounded bg-teal-500/15 px-2 py-0.5 text-xs font-medium text-teal-300">{entry.tracker}</span>}
+                                    </div>
+                                    {entry.description && <p className="line-clamp-2 text-sm text-slate-400">{entry.description}</p>}
+                                    <div className="flex items-center gap-2 pt-1">
+                                        <input
+                                            type="checkbox"
+                                            aria-label={`Select entry ${entry.id}`}
+                                            checked={selectedEntries.has(entry.id)}
+                                            onChange={() => toggleSelection(entry.id)}
+                                            className="h-5 w-5 rounded border-slate-700 bg-slate-900 text-emerald-600 [color-scheme:dark]"
+                                        />
+                                        <Link
+                                            href={`${route('work-hours.edit', entry.id)}?return_to=${encodeURIComponent(currentListUrl())}`}
+                                            className="ml-auto rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white"
+                                        >
+                                            Edit
+                                        </Link>
+                                        <button type="button" onClick={() => handleDelete(entry.id)} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {filteredData.length > 0 && (
+                                <div className="flex items-center justify-between bg-slate-950 px-4 py-3">
+                                    <span className="text-sm font-bold text-slate-100">Total (all pages)</span>
+                                    <span className="text-lg font-bold text-emerald-400">{timeFormat(totalHours.toFixed(2))}</span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="hidden overflow-x-auto md:block">
                             <table className="min-w-full divide-y divide-slate-800">
                                 <thead className="bg-slate-900">
                                     <tr>

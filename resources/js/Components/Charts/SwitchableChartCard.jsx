@@ -57,7 +57,7 @@ export default function SwitchableChartCard({
 
     return (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-            <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
                     {subtitle && <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p>}
