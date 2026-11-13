@@ -83,15 +83,36 @@ class User extends Authenticatable
         'summary_layout' => 'array',
     ];
 
+    /**
+     * Owner sits above Super Admin: full control, but the tracker does not
+     * apply to them. Owners never clock in or track, and are left out of
+     * attendance, reports, team views, alerts and Slack posts. Only an Owner
+     * can make or change another Owner.
+     */
+    public const OWNER = 'owner';
+
     const ROLES = [
+        'owner' => 'Owner',
         'super_admin' => 'Super Admin',
         'admin' => 'Admin',
         'member' => 'Member',
     ];
 
+    /** Owners and Super Admins share every management power. */
     public function isSuperAdmin(): bool
     {
-        return $this->role === 'super_admin';
+        return $this->role === 'super_admin' || $this->role === self::OWNER;
+    }
+
+    public function isOwner(): bool
+    {
+        return $this->role === self::OWNER;
+    }
+
+    /** Does the tracker apply to this person? False for Owners. */
+    public function isTracked(): bool
+    {
+        return ! $this->isOwner();
     }
 
     public function hasPermission(string $permission): bool
@@ -428,6 +449,22 @@ class User extends Authenticatable
     public function scopeTracksTime($query)
     {
         return $query->where('tracks_time', true);
+    }
+
+    /**
+     * People the tracker applies to: everyone except Owners. Every staff list
+     * (attendance, reports, team, summary, alerts, Slack) chains this so an
+     * Owner never appears as an employee.
+     */
+    public function scopeStaff($query)
+    {
+        return $query->where(fn ($q) => $q->whereNull('role')->orWhere('role', '!=', self::OWNER));
+    }
+
+    /** Subquery of Owner ids, for filtering rows (work hours, entries) by user_id. */
+    public static function ownerIdsQuery()
+    {
+        return static::query()->select('id')->where('role', self::OWNER);
     }
 
     /**

@@ -40,6 +40,15 @@ class AuthController extends Controller
             ]);
         }
 
+        // Owners are not tracked, so they never get a tracker token.
+        if ($user->isOwner()) {
+            $user->tokens()->delete();
+
+            throw ValidationException::withMessages([
+                'email' => ['Owner accounts are not tracked. Sign in on the website to manage the team.'],
+            ]);
+        }
+
         // Allow only one active token per device_name
         $user->tokens()->where('name', $data['device_name'])->delete();
 

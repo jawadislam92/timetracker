@@ -343,6 +343,8 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
     // Time zone), not a hard-coded Asia/Karachi, so the switcher applies here too.
     const { formatTime, tz } = useFormatters();
     const can = (permission) => auth.user?.is_super_admin || auth.user?.permissions?.includes(permission);
+    // Owners manage the team but are not tracked: no clock buttons or personal stats.
+    const isOwner = !!auth.user?.is_owner;
     const canViewTeam = can('dashboard.view_team') || can('attendance.view');
     const canViewAnalytics = can('analytics.view');
     const [entries, setEntries] = useState([]);
@@ -857,10 +859,13 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
                             <div>
                                 <p className="text-sm font-semibold text-orange-400">{getTimeBasedGreeting(tz)}</p>
                                 <h1 className="mt-1 text-2xl font-bold text-white">{auth.user.name}</h1>
-                                <p className="mt-1 text-sm text-slate-400">Track today&apos;s work and review current team activity.</p>
+                                <p className="mt-1 text-sm text-slate-400">
+                                    {isOwner ? 'Owner · you manage the team and are not tracked.' : 'Track today’s work and review current team activity.'}
+                                </p>
                             </div>
 
                             <div className="flex flex-wrap items-center gap-3">
+                                {!isOwner && (<>
                                 <Link
                                     href={route('desktop-downloads.index')}
                                     className="hidden items-center sm:inline-flex gap-2 rounded-lg border border-orange-500/40 bg-orange-500/15 px-3 py-2 text-sm font-semibold text-orange-300 transition hover:bg-orange-500/25"
@@ -873,6 +878,7 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
                                     <span className={`h-2 w-2 rounded-full ${currentStatus.dot}`} />
                                     {currentStatus.label}
                                 </div>
+                                </>)}
                                 <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-right backdrop-blur">
                                     <div className="text-lg font-bold text-white">
                                         {formatTime(currentTime.toISOString())}
@@ -942,6 +948,7 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
                         </section>
                     )}
 
+                    {!isOwner && (<>
                     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                         {metrics.map((metric) => {
                             const Icon = metric.icon;
@@ -997,6 +1004,7 @@ export default function Dashboard({ auth, shiftOptions = [] }) {
                             })}
                         </div>
                     </section>
+                    </>)}
 
                     <section className="rounded-lg border border-slate-800 bg-slate-900 shadow-sm">
                         <div className="flex flex-col gap-3 border-b border-slate-800 px-5 py-4">

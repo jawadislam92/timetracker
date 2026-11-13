@@ -223,6 +223,7 @@ class UserController extends Controller
         }
 
         $validated = $request->validate($rules);
+        $this->guardOwnerRole($validated['role'] ?? null);
 
         $avatarPath = null;
         if ($request->hasFile('avatar')) {
@@ -342,14 +343,20 @@ class UserController extends Controller
 
         $validated = $request->validate($rules);
         $this->guardSuperAdminTarget($user);
+        if ($request->user()->isSuperAdmin()) {
+            $this->guardOwnerRole($validated['role'] ?? null);
+        }
 
         if ($request->user()->is($user)
             && $request->user()->isSuperAdmin()
-            && ($validated['role'] ?? 'member') !== 'super_admin') {
+            && ($validated['role'] ?? 'member') !== $user->role) {
             throw ValidationException::withMessages([
-                'role' => 'You cannot remove Super Admin access from your own account.',
+                'role' => $user->isOwner()
+                    ? 'You cannot remove Owner from your own account.'
+                    : 'You cannot remove Super Admin access from your own account.',
             ]);
         }
+        $wasOwner = $user->isOwner();
 
         // Snapshot the shift config BEFORE the edit so we can tell whether this
         // request actually changed it (an unrelated profile edit must not add a
@@ -369,7 +376,7 @@ class UserController extends Controller
 
         if ($request->user()->isSuperAdmin()) {
             $user->role = $validated['role'] ?? 'member';
-            $user->permissions = $user->role === 'super_admin'
+            $user->permissions = $user->isSuperAdmin()
                 ? []
                 : $this->validatedPermissions($validated['permissions'] ?? []);
             $user->include_in_slack_reports = $validated['include_in_slack_reports'] ?? true;
@@ -410,8 +417,10 @@ class UserController extends Controller
 
         $this->rememberDesignation($user->designation);
 
-        if (! $user->isActive()) {
-            $user->tokens()->delete(); // deactivated → revoke desktop tokens immediately
+        if (! $user->isActive() || ($user->isOwner() && ! $wasOwner)) {
+            // Deactivated, or just made an Owner (Owners are not tracked):
+            // revoke desktop tokens so the tracker app stops immediately.
+            $user->tokens()->delete();
         }
 
         return $this->redirectToReturnPath($request, 'users.index', [
@@ -526,7 +535,9 @@ class UserController extends Controller
     private function accessFormProps(): array
     {
         return [
-            'roles' => config('access.roles'),
+            'roles' => request()->user()->isOwner()
+                ? config('access.roles')
+                : array_diff_key(config('access.roles'), [User::OWNER => true]),
             'permissionGroups' => config('access.permissions'),
             'canManageAccess' => request()->user()->isSuperAdmin(),
             'designationOptions' => $this->designationOptions()->pluck('name')->values()->all(),
@@ -686,6 +697,10 @@ class UserController extends Controller
             abort(403, 'Only Super Admins can change roles, permissions, tracking, device, or Slack-report access.');
         }
 
+        if (! empty($data['set_role'])) {
+            $this->guardOwnerRole($data['role'] ?? null);
+        }
+
         $users = User::whereIn('id', $data['user_ids'])->get();
         $updated = 0;
 
@@ -693,6 +708,10 @@ class UserController extends Controller
             if ($user->isSuperAdmin() && ! $actor->isSuperAdmin()) {
                 continue;
             }
+            if ($user->isOwner() && ! $actor->isOwner()) {
+                continue; // only an Owner can change an Owner
+            }
+            $wasOwner = $user->isOwner();
 
             if (! empty($data['set_shift'])) {
                 $user->shift_start_time = $data['shift_start_time'] ?? null;
@@ -728,9 +747,9 @@ class UserController extends Controller
             // store()/update() do.
             if (! empty($data['set_role']) && ! empty($data['role']) && $actor->isSuperAdmin()) {
                 $newRole = $data['role'];
-                if (! ($actor->is($user) && $newRole !== 'super_admin')) {
+                if (! ($actor->is($user) && $newRole !== $user->role)) {
                     $user->role = $newRole;
-                    if ($newRole === 'super_admin') {
+                    if ($user->isSuperAdmin()) {
                         $user->permissions = [];
                     }
                 }
@@ -759,6 +778,9 @@ class UserController extends Controller
 
             if ($user->isDirty()) {
                 $user->save();
+                if ($user->isOwner() && ! $wasOwner) {
+                    $user->tokens()->delete(); // Owners are not tracked
+                }
                 $updated++;
             }
         }
@@ -824,6 +846,9 @@ class UserController extends Controller
         foreach (User::whereIn('id', $ids)->get() as $user) {
             if ($user->isSuperAdmin() && ! $actor->isSuperAdmin()) {
                 continue; // can't touch a Super Admin unless you are one
+            }
+            if ($user->isOwner() && ! $actor->isOwner()) {
+                continue; // only an Owner can change an Owner
             }
             if ($actor->is($user)) {
                 continue; // never flip your own account in a bulk action
@@ -905,8 +930,21 @@ class UserController extends Controller
 
     private function guardSuperAdminTarget(User $user): void
     {
+        if ($user->isOwner() && ! request()->user()->isOwner()) {
+            abort(403, 'Only an Owner can manage an Owner account.');
+        }
         if ($user->isSuperAdmin() && ! request()->user()->isSuperAdmin()) {
             abort(403, 'Only a Super Admin can manage another Super Admin account.');
+        }
+    }
+
+    /** Only an Owner may hand out the Owner role. */
+    private function guardOwnerRole(?string $role): void
+    {
+        if ($role === User::OWNER && ! request()->user()->isOwner()) {
+            throw ValidationException::withMessages([
+                'role' => 'Only an Owner can make someone an Owner.',
+            ]);
         }
     }
 }

@@ -35,7 +35,7 @@ class TeamController extends Controller
 
         // Only time-tracking staff appear in performance — HR/finance and other
         // non-tracking roles are excluded so they don't read as "0% this week".
-        $usersQuery = User::active()->tracksTime()->with('shift:id,name')->orderBy('name');
+        $usersQuery = User::active()->staff()->tracksTime()->with('shift:id,name')->orderBy('name');
         \App\Support\ShiftFilter::apply($usersQuery, $request);
         $users = $usersQuery->get(['id', 'name', 'email', 'role', 'designation', 'avatar', 'shift_id']);
 
@@ -369,7 +369,7 @@ class TeamController extends Controller
             'start' => $start->toDateString(),
             'end' => $end->toDateString(),
             'userId' => $userId ?: null,
-            'users' => User::active()->orderBy('name')->get(['id', 'name']),
+            'users' => User::active()->staff()->orderBy('name')->get(['id', 'name']),
             'apps' => $rollup('active_app'),
             'urls' => $rollup('url_domain'),
             'totals' => [

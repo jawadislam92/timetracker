@@ -2,6 +2,10 @@
 
 return [
     'roles' => [
+        'owner' => [
+            'label' => 'Owner',
+            'description' => 'Full control, but not tracked: never in attendance, reports or alerts. Only an Owner can assign it.',
+        ],
         'super_admin' => [
             'label' => 'Super Admin',
             'description' => 'Full system access, including roles and permissions.',

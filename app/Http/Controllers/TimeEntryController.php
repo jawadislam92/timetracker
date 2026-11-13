@@ -57,6 +57,9 @@ class TimeEntryController extends Controller
         ]);
 
         $user = Auth::user();
+        if ($user->isOwner()) {
+            return response()->json(['message' => 'Owner accounts are not tracked, so there is nothing to clock.'], 422);
+        }
         // action_timestamp + action_time are stored in the app timezone so the
         // canonical instant round-trips; the worker's own attendance day is
         // resolved by attendanceDateFor() (which converts to their work tz).
@@ -215,7 +218,7 @@ class TimeEntryController extends Controller
             // effectiveShiftFor() per employee without an N+1 (one extra query
             // for the whole team instead of one per person). Non-tracking staff
             // (HR etc.) are excluded so they don't dilute the KPIs at 0%.
-            $employeesQuery = User::active()->tracksTime()->with(array_merge(User::shiftEagerLoads(), ['shift:id,name,sort_order']));
+            $employeesQuery = User::active()->staff()->tracksTime()->with(array_merge(User::shiftEagerLoads(), ['shift:id,name,sort_order']));
             \App\Support\ShiftFilter::apply($employeesQuery, request());
             $employees = $employeesQuery->get();
             $ids = $employees->pluck('id')->all();
@@ -289,7 +292,7 @@ class TimeEntryController extends Controller
         [$dayStart, $dayEnd] = BusinessTime::utcRange($rangeStart, $rangeEnd);
         $svc = app(TrackingSessionService::class);
 
-        $usersQuery = User::active()->tracksTime()->with('shift:id,name')->orderBy('name');
+        $usersQuery = User::active()->staff()->tracksTime()->with('shift:id,name')->orderBy('name');
         \App\Support\ShiftFilter::apply($usersQuery, $request);
         $users = $usersQuery->get(['id', 'name', 'designation', 'avatar', 'shift_id']);
         $ids = $users->pluck('id');
@@ -406,7 +409,7 @@ class TimeEntryController extends Controller
     {
         $user = Auth::user();
         $ids = $user->hasAnyPermission(['dashboard.view_team', 'attendance.view'])
-            ? User::active()->pluck('id')->all()
+            ? User::active()->staff()->pluck('id')->all()
             : [$user->id];
 
         $tz = 'Asia/Karachi';

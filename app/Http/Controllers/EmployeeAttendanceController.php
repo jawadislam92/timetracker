@@ -404,6 +404,7 @@ class EmployeeAttendanceController extends Controller
                     $query->orWhereIn('id', $usersWithHistory->all());
                 }
             })
+            ->staff()
             ->orderBy('name');
         \App\Support\ShiftFilter::apply($employeesQuery, $request);
         $employees = $employeesQuery->get()
@@ -651,7 +652,7 @@ class EmployeeAttendanceController extends Controller
         // doesn't recreate marks for archived users. Explicit selections are
         // honoured as-is (admin-chosen ids).
         $userIds = $validated['scope'] === 'company'
-            ? User::query()->active()->pluck('id')->all()
+            ? User::query()->active()->staff()->pluck('id')->all()
             : array_values(array_unique($validated['user_ids'] ?? []));
 
         if ($userIds === []) {
@@ -855,7 +856,7 @@ class EmployeeAttendanceController extends Controller
         // Live summary view: only iterate active staff. Deactivated users with no
         // entries are already skipped (the null-on-empty filter below), and their
         // historical day entries remain queryable by explicit user id elsewhere.
-        $employees = \App\Support\ShiftFilter::apply(User::active()->with('shift:id,name'), $request)->orderBy('name')->get()->map(function ($employee) use ($entriesByUser) {
+        $employees = \App\Support\ShiftFilter::apply(User::active()->staff()->with('shift:id,name'), $request)->orderBy('name')->get()->map(function ($employee) use ($entriesByUser) {
             $entries = $entriesByUser->get($employee->id, collect());
 
             if ($entries->isEmpty()) {
@@ -903,7 +904,7 @@ class EmployeeAttendanceController extends Controller
 
         // Live detailed view iterates active staff only (deactivated users are
         // hidden going forward); empty-entry users are dropped below.
-        $activities = \App\Support\ShiftFilter::apply(User::active()->with('shift:id,name'), $request)->orderBy('name')->get()->map(function ($employee) use ($entriesByUser) {
+        $activities = \App\Support\ShiftFilter::apply(User::active()->staff()->with('shift:id,name'), $request)->orderBy('name')->get()->map(function ($employee) use ($entriesByUser) {
             $entries = $entriesByUser->get($employee->id, collect());
 
             if ($entries->isEmpty()) {
@@ -950,7 +951,7 @@ class EmployeeAttendanceController extends Controller
 
         // Live timeline view iterates active staff only; empty-entry users are
         // dropped below.
-        $timelines = \App\Support\ShiftFilter::apply(User::active()->with('shift:id,name'), $request)->orderBy('name')->get()->map(function ($employee) use ($entriesByUser) {
+        $timelines = \App\Support\ShiftFilter::apply(User::active()->staff()->with('shift:id,name'), $request)->orderBy('name')->get()->map(function ($employee) use ($entriesByUser) {
             $entries = $entriesByUser->get($employee->id, collect());
 
             if ($entries->isEmpty()) {
@@ -988,7 +989,7 @@ class EmployeeAttendanceController extends Controller
 
         $entriesByUser = $this->entriesForDateByUser($date);
         // Live export iterates active staff only; empty-entry users are skipped below.
-        $employees = User::active()->orderBy('name')->get();
+        $employees = User::active()->staff()->orderBy('name')->get();
 
         foreach ($employees as $employee) {
             $entries = $entriesByUser->get($employee->id, collect());

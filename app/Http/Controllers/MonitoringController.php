@@ -33,7 +33,7 @@ class MonitoringController extends Controller
         return Inertia::render('Monitoring/SessionsList', [
             'sessions' => $sessions,
             'users' => $canViewAll
-                ? User::active()->orderBy('name')->get(['id', 'name'])
+                ? User::active()->staff()->orderBy('name')->get(['id', 'name'])
                 : [],
             'filters' => [
                 'user_id' => $request->input('user_id'),

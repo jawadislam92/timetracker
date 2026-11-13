@@ -39,6 +39,7 @@ class SummaryController extends Controller
         $prevStart = $prevEnd->copy()->subDays($days - 1);
 
         $rows = WorkHour::query()
+            ->whereNotIn('user_id', User::ownerIdsQuery())
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->where('hours', '>', 0)
             ->selectRaw('user_id, date, work_type, client_id, SUM(hours) as hours')
@@ -48,6 +49,7 @@ class SummaryController extends Controller
 
         // Previous period of equal length, per person, for the "vs last period" deltas.
         $previous = WorkHour::query()
+            ->whereNotIn('user_id', User::ownerIdsQuery())
             ->whereBetween('date', [$prevStart->toDateString(), $prevEnd->toDateString()])
             ->selectRaw('user_id, SUM(hours) as total, SUM(CASE WHEN work_type IN ('.implode(',', array_fill(0, count(self::BILLABLE_TYPES), '?')).') THEN hours ELSE 0 END) as billable', self::BILLABLE_TYPES)
             ->groupBy('user_id')
@@ -61,6 +63,7 @@ class SummaryController extends Controller
         // Everyone active, plus anyone archived who still logged hours in range.
         $users = User::query()
             ->where(fn ($q) => $q->active()->orWhereIn('id', $loggedIds))
+            ->staff()
             ->orderBy('name')
             ->get(['id', 'name', 'designation', 'avatar', 'is_active'])
             ->map(fn (User $u) => [
@@ -157,7 +160,7 @@ class SummaryController extends Controller
     /** Every designation in use or on file, with its department and head-count. */
     private function designationRows(): array
     {
-        $counts = User::query()->active()
+        $counts = User::query()->active()->staff()
             ->whereNotNull('designation')->where('designation', '!=', '')
             ->get(['designation'])
             ->groupBy(fn ($u) => mb_strtolower(trim($u->designation)))

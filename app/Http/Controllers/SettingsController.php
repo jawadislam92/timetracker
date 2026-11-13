@@ -37,7 +37,7 @@ class SettingsController extends Controller
         // tracked too and the desktop honours their per-user overrides
         // (effectiveForUser), so the owner can configure individual settings for
         // anyone on the roster.
-        $users = User::orderBy('name')
+        $users = User::staff()->orderBy('name')
             ->get(['id', 'name', 'email', 'role']);
 
         $overrides = UserMonitoringSetting::whereIn('user_id', $users->pluck('id'))

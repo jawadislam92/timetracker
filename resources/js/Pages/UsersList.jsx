@@ -11,6 +11,7 @@ import { TraditionalPagination } from '@/Components/Pagination';
 import { WORK_TIMEZONES } from '@/constants/workTimezones';
 
 const roleStyles = {
+    owner: 'bg-amber-500/15 text-amber-300',
     super_admin: 'bg-violet-500/15 text-violet-300',
     admin: 'bg-blue-500/15 text-blue-300',
     member: 'bg-emerald-500/15 text-emerald-300',
@@ -20,6 +21,8 @@ const noDesignationValue = 'no_designation';
 
 export default function UsersList({ auth, users, filters = {}, filterOptions = {}, managedDesignations = [], managedShifts = [], permissionGroups = {} }) {
     const can = (permission) => auth.user?.is_super_admin || auth.user?.permissions?.includes(permission);
+    // Super Admins are protected from non-Super-Admins; Owners from everyone but Owners.
+    const isLocked = (u) => (u.role === 'super_admin' && !auth.user.is_super_admin) || (u.role === 'owner' && !auth.user.is_owner);
     const [search, setSearch] = useState(filters.search || '');
     const [roles, setRoles] = useState((filters.roles || []).map(String));
     const [designations, setDesignations] = useState((filters.designations || []).map(String));
@@ -433,7 +436,7 @@ export default function UsersList({ auth, users, filters = {}, filterOptions = {
                         </div>
 
                         {!selectAllMatching && selectedIds.size > 0 && users.total > users.data.length
-                            && selectedIds.size >= users.data.filter((u) => !(u.role === 'super_admin' && !auth.user.is_super_admin)).length && (
+                            && selectedIds.size >= users.data.filter((u) => !isLocked(u)).length && (
                             <div className="border-b border-slate-800 bg-orange-500/5 px-5 py-2 text-center text-sm text-slate-300">
                                 All {selectedIds.size} on this page selected.{' '}
                                 <button type="button" onClick={() => setSelectAllMatching(true)} className="font-semibold text-orange-400 hover:text-orange-300">
@@ -450,11 +453,11 @@ export default function UsersList({ auth, users, filters = {}, filterOptions = {
                                             <th className="w-10 px-4 py-3">
                                                 <input
                                                     type="checkbox"
-                                                    checked={users.data.length > 0 && users.data.every((u) => selectedIds.has(u.id) || (u.role === 'super_admin' && !auth.user.is_super_admin))}
+                                                    checked={users.data.length > 0 && users.data.every((u) => selectedIds.has(u.id) || isLocked(u))}
                                                     onChange={(e) => {
                                                         const next = new Set(selectedIds);
                                                         users.data.forEach((u) => {
-                                                            if (u.role === 'super_admin' && !auth.user.is_super_admin) return;
+                                                            if (isLocked(u)) return;
                                                             e.target.checked ? next.add(u.id) : next.delete(u.id);
                                                         });
                                                         setSelectedIds(next);
@@ -505,13 +508,13 @@ export default function UsersList({ auth, users, filters = {}, filterOptions = {
                                             </td>
                                         </tr>
                                     ) : users.data.map((user) => {
-                                        const canEdit = can('users.manage') && (auth.user.is_super_admin || user.role !== 'super_admin');
+                                        const canEdit = can('users.manage') && !isLocked(user);
                                         const canDelete = can('users.delete')
                                             && user.id !== auth.user.id
-                                            && (auth.user.is_super_admin || user.role !== 'super_admin');
+                                            && !isLocked(user);
                                         const canSetStatus = can('users.manage')
                                             && user.id !== auth.user.id
-                                            && (auth.user.is_super_admin || user.role !== 'super_admin');
+                                            && !isLocked(user);
 
                                         return (
                                             <tr key={user.id} className={`bg-slate-900 transition hover:bg-slate-800/40 ${selectedIds.has(user.id) ? 'bg-orange-500/10' : ''}`}>
@@ -520,7 +523,7 @@ export default function UsersList({ auth, users, filters = {}, filterOptions = {
                                                         <input
                                                             type="checkbox"
                                                             checked={selectedIds.has(user.id)}
-                                                            disabled={user.role === 'super_admin' && !auth.user.is_super_admin}
+                                                            disabled={isLocked(user)}
                                                             onChange={() => toggleSelected(user.id)}
                                                             className="rounded border-slate-700 text-orange-600 focus:ring-orange-500"
                                                         />
@@ -560,7 +563,7 @@ export default function UsersList({ auth, users, filters = {}, filterOptions = {
                                                 </td>
                                                 <td className="whitespace-nowrap px-4 py-3">
                                                     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${roleStyles[user.role] || 'bg-slate-700/40 text-slate-300'}`}>
-                                                        {user.role === 'super_admin' && <ShieldCheck className="h-3.5 w-3.5" />}
+                                                        {(user.role === 'super_admin' || user.role === 'owner') && <ShieldCheck className="h-3.5 w-3.5" />}
                                                         {user.role_label || user.role}
                                                     </span>
                                                 </td>
@@ -721,7 +724,7 @@ export default function UsersList({ auth, users, filters = {}, filterOptions = {
                                     {bulk.setRole && (
                                         <select value={bulk.role} onChange={(e) => setBulk({ ...bulk, role: e.target.value })} className="mt-2 w-full rounded-lg border-slate-700 bg-slate-900 text-sm text-slate-200 [color-scheme:dark]">
                                             <option value="">Choose a role…</option>
-                                            {roleOptions.map((r) => (
+                                            {roleOptions.filter((r) => r.value !== 'owner' || auth.user.is_owner).map((r) => (
                                                 <option key={r.value} value={r.value}>{r.label}</option>
                                             ))}
                                         </select>

@@ -29,7 +29,7 @@ class TimelineController extends Controller
         $date = $this->resolveDate($request, $targetUser->workTimezone());
 
         $users = $canViewOthers
-            ? User::active()->orderBy('name')->get(['id', 'name', 'email', 'role'])
+            ? User::active()->staff()->orderBy('name')->get(['id', 'name', 'email', 'role'])
             : collect([['id' => $authUser->id, 'name' => $authUser->name, 'email' => $authUser->email, 'role' => $authUser->role]]);
 
         return Inertia::render('Timeline/Index', [

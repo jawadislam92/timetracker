@@ -125,7 +125,7 @@ class AiAssistantController extends Controller
         $end = BusinessTime::today();
         $start = $end->copy()->subDays(13);
 
-        $users = User::orderBy('name')->get(['id', 'name', 'designation', 'shift_start_time']);
+        $users = User::staff()->orderBy('name')->get(['id', 'name', 'designation', 'shift_start_time']);
 
         $hours = WorkHour::with('client:id,name')
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])

@@ -39,6 +39,14 @@ class EnsureUserIsActive
             ]);
         }
 
+        // Owners are not tracked: a desktop token that predates the promotion
+        // is revoked on its next call, so the tracker app stops at once.
+        if ($user && $user->isOwner() && ! $request->hasSession()) {
+            $user->currentAccessToken()?->delete();
+
+            return response()->json(['message' => 'Owner accounts are not tracked. Sign in on the website to manage the team.'], 403);
+        }
+
         return $next($request);
     }
 }

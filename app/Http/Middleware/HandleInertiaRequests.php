@@ -73,6 +73,7 @@ class HandleInertiaRequests extends Middleware
                 'designation' => $user->designation,
                 'permissions' => $user->effectivePermissions(),
                 'is_super_admin' => $user->isSuperAdmin(),
+                'is_owner' => $user->isOwner(),
             ];
 
             try {
@@ -147,9 +148,9 @@ class HandleInertiaRequests extends Middleware
 
         $canCreateManualWorkHour = false;
         if ($user) {
-            $canCreateManualWorkHour = $user->isSuperAdmin()
+            $canCreateManualWorkHour = ! $user->isOwner() && ($user->isSuperAdmin()
                 || $user->hasPermission('work_hours.manage_all')
-                || ($teamSettings['allow_offline_time'] ?? false);
+                || ($teamSettings['allow_offline_time'] ?? false));
         }
 
         if ($authUser) {

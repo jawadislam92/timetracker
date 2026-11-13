@@ -45,6 +45,7 @@ class SlackReportService
             ->get(['id', 'user_id', 'client_id', 'work_type', 'tracker', 'hours']);
 
         $users = User::query()
+            ->staff()
             ->when(
                 ! empty($filters['userIds']),
                 fn ($userQuery) => $userQuery->whereIn('id', $filters['userIds']),

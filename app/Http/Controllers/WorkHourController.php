@@ -51,6 +51,10 @@ class WorkHourController extends Controller
     {
         $user = auth()->user();
 
+        if ($user->isOwner()) {
+            abort(403, 'Owner accounts are not tracked, so they do not log work hours.');
+        }
+
         if ($user->isSuperAdmin() || $user->hasPermission('work_hours.manage_all')) {
             return;
         }
@@ -571,7 +575,8 @@ class WorkHourController extends Controller
 
     public function export(Request $request)
     {
-        $query = WorkHour::with('user', 'client');
+        // Owners are not tracked, so their rows never appear in team reports.
+        $query = WorkHour::with('user', 'client')->whereNotIn('user_id', User::ownerIdsQuery());
         $filter = $request->input('filter', 'all');
         $startDate = $request->input('startDate');
         $endDate = $request->input('endDate');
@@ -604,7 +609,7 @@ class WorkHourController extends Controller
 
     public function report(Request $request, SlackReportService $slack, ReportSummaryService $summaries)
     {
-        $query = WorkHour::query();
+        $query = WorkHour::query()->whereNotIn('user_id', User::ownerIdsQuery());
         $filter = $request->input('filter', 'all');
         $startDate = $request->input('startDate');
         $endDate = $request->input('endDate');
@@ -744,7 +749,7 @@ class WorkHourController extends Controller
         // Preserve query parameters in pagination links
         $workHours?->appends($request->query());
 
-        $users = User::orderBy('name')->get(['id', 'name', 'include_in_slack_reports']);
+        $users = User::staff()->orderBy('name')->get(['id', 'name', 'include_in_slack_reports']);
 
         return Inertia::render('WorkHoursReport', [
             'search' => $search,

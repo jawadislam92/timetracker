@@ -72,6 +72,9 @@ class SilentTrackerCheck extends Command
             }
 
             $user = User::find($s->user_id);
+            if ($user?->isOwner()) {
+                continue; // Owners are not tracked, so never alert on them
+            }
             $name = $user?->name ?? ('#'.$s->user_id);
 
             // A break legitimately captures nothing — never AV-alert someone on

@@ -47,6 +47,7 @@ class ActivityDigestService
 
         $userIds = $sessions->pluck('user_id')->merge($samples->pluck('user_id'))->unique();
         $users = User::whereIn('id', $userIds)
+            ->staff()
             ->where('include_in_slack_reports', true)
             ->where('tracks_time', true)
             ->where('is_active', true)

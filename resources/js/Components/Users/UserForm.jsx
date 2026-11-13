@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useForm } from '@inertiajs/react';
-import { ArrowLeft, Camera, Check, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Camera, Check, Crown, ShieldCheck, UserRound, Users } from 'lucide-react';
 import Avatar from '@/Components/Avatar';
 import { WORK_TIMEZONES } from '@/constants/workTimezones';
 
 const roleIcons = {
+    owner: Crown,
     super_admin: ShieldCheck,
     admin: Users,
     member: UserRound,
@@ -72,9 +73,11 @@ export default function UserForm({
         );
     };
 
+    const fullAccess = form.data.role === 'super_admin' || form.data.role === 'owner';
+
     const selectRole = (role) => {
         form.setData('role', role);
-        if (role === 'super_admin') form.setData('permissions', []);
+        if (role === 'super_admin' || role === 'owner') form.setData('permissions', []);
     };
 
     const handleAvatar = (event) => {
@@ -324,8 +327,8 @@ export default function UserForm({
                         <div className="border-b border-slate-800 px-5 py-4">
                             <h2 className="font-bold text-white">Selected access</h2>
                             <p className="mt-1 text-sm text-slate-400">
-                                {form.data.role === 'super_admin'
-                                    ? 'Super Admin already has every permission.'
+                                {fullAccess
+                                    ? `${form.data.role === 'owner' ? 'Owner' : 'Super Admin'} already has every permission.`
                                     : 'Choose only the areas this account needs.'}
                             </p>
                         </div>
@@ -343,15 +346,15 @@ export default function UserForm({
                                                 <label
                                                     key={permission}
                                                     className={`flex items-start gap-3 rounded-lg px-3 py-2 ${
-                                                        form.data.role === 'super_admin'
+                                                        fullAccess
                                                             ? 'cursor-not-allowed bg-slate-800'
                                                             : 'cursor-pointer hover:bg-slate-800'
                                                     }`}
                                                 >
                                                     <input
                                                         type="checkbox"
-                                                        checked={form.data.role === 'super_admin' || form.data.permissions.includes(permission)}
-                                                        disabled={form.data.role === 'super_admin'}
+                                                        checked={fullAccess || form.data.permissions.includes(permission)}
+                                                        disabled={fullAccess}
                                                         onChange={() => togglePermission(permission)}
                                                         className="mt-0.5 rounded border-slate-700 bg-slate-900 text-orange-500 focus:ring-orange-500"
                                                     />
